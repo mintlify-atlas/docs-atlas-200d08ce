@@ -1,0 +1,102 @@
+---
+title: 'Update Client'
+api: 'PATCH /api/clients/:id'
+description: 'Update information for an existing client'
+---
+
+## Request
+
+### Path Parameters
+
+<ParamField path="id" type="number" required>
+  The unique identifier of the client to update. Must be a valid integer.
+  
+  **Example:** `1`
+</ParamField>
+
+### Body Parameters
+
+<ParamField body="name" type="string">
+  Updated business name or client name. Must be between 3 and 100 characters. This field is optional.
+  
+  **Example:** `"Nueva Empresa SAC"`
+</ParamField>
+
+## Response
+
+<ResponseField name="id" type="number">
+  Client's unique identifier
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Client's updated business name or name
+</ResponseField>
+
+<ResponseField name="status" type="number">
+  Client status. `1` for active, `0` for inactive
+</ResponseField>
+
+## Error Responses
+
+### 400 Bad Request
+
+Returned when validation fails:
+
+- The `id` parameter is not a valid integer
+- `name` (if provided) must be a string
+- `name` (if provided) must be at least 3 characters long
+- `name` (if provided) must not exceed 100 characters
+
+```json
+{
+  "statusCode": 400,
+  "message": [
+    "name must be longer than or equal to 3 characters"
+  ],
+  "error": "Bad Request"
+}
+```
+
+### 404 Not Found
+
+Returned when a client with the specified ID does not exist.
+
+```json
+{
+  "statusCode": 404,
+  "message": "Cliente con ID {id} no encontrado",
+  "error": "Not Found"
+}
+```
+
+### 500 Internal Server Error
+
+Returned when an unexpected database error occurs while updating the client.
+
+## Example Request
+
+```bash cURL
+curl -X PATCH https://api.example.com/api/clients/1 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Nueva Empresa SAC"
+  }'
+```
+
+## Example Response
+
+```json 200 OK
+{
+  "id": 1,
+  "name": "Nueva Empresa SAC",
+  "status": 1
+}
+```
+
+```json 404 Not Found
+{
+  "statusCode": 404,
+  "message": "Cliente con ID 999 no encontrado",
+  "error": "Not Found"
+}
+```

@@ -1,0 +1,348 @@
+---
+title: 'Architecture Overview'
+description: 'Understanding the hexagonal architecture and modular structure of the Sinapsis Marketing Campaigns API'
+---
+
+## Hexagonal Architecture Pattern
+
+The Sinapsis Marketing Campaigns API is built using **hexagonal architecture** (also known as ports and adapters architecture) implemented through NestJS modules. This pattern promotes separation of concerns, testability, and maintainability by organizing code into distinct layers.
+
+### Core Principles
+
+<Info>
+  **Hexagonal architecture** isolates business logic from external concerns like databases, HTTP, and third-party services. This makes the core domain logic independent and easily testable.
+</Info>
+
+## Module Structure
+
+The application is organized into four main feature modules, each encapsulating a specific domain:
+
+<CodeGroup>
+```typescript src/app.module.ts
+import { Module } from '@nestjs/common';
+import { ReportsModule } from './modules/reports/reports.module';
+import { CampaignsModule } from './modules/campaigns/campaigns.module';
+import { UsersModule } from './modules/users/users.module';
+import { ClientsModule } from './modules/clients/clients.module';
+
+@Module({
+  imports: [
+    ReportsModule,
+    CampaignsModule,
+    UsersModule,
+    ClientsModule,
+  ],
+})
+export class AppModule {}
+```
+</CodeGroup>
+
+### Module Breakdown
+
+| Module | Responsibility | Key Files |
+|--------|---------------|----------|
+| **CampaignsModule** | Campaign creation and scheduling | `campaigns.controller.ts`, `campaigns.service.ts` |
+| **UsersModule** | User management | `users.controller.ts`, `users.service.ts` |
+| **ClientsModule** | Client management | `clients.controller.ts`, `clients.service.ts` |
+| **ReportsModule** | Message reporting and analytics | `reports.controller.ts`, `reports.service.ts` |
+
+## Dependency Injection
+
+NestJS's dependency injection system is used throughout the application to manage service dependencies and promote loose coupling.
+
+### Example: CampaignsModule
+
+<CodeGroup>
+```typescript src/modules/campaigns/campaigns.module.ts
+import { Module } from '@nestjs/common';
+import { CampaignsService } from './campaigns.service';
+import { CampaignsController } from './campaigns.controller';
+
+@Module({
+  controllers: [CampaignsController],
+  providers: [CampaignsService],
+})
+export class CampaignsModule {}
+```
+</CodeGroup>
+
+The `@Module()` decorator defines:
+- **controllers**: HTTP route handlers
+- **providers**: Injectable services containing business logic
+- **imports**: Other modules whose exports are needed
+- **exports**: Services to make available to other modules
+
+### Example: TypeORM Integration
+
+<CodeGroup>
+```typescript src/modules/clients/clients.module.ts
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { ClientsService } from './clients.service';
+import { ClientsController } from './clients.controller';
+import { Client } from '../../entities/client.entity';
+
+@Module({
+  imports: [TypeOrmModule.forFeature([Client])],
+  controllers: [ClientsController],
+  providers: [ClientsService],
+  exports: [ClientsService]
+})
+export class ClientsModule {}
+```
+</CodeGroup>
+
+<Note>
+  `TypeOrmModule.forFeature([Entity])` registers repositories for dependency injection, allowing services to inject and use entity repositories.
+</Note>
+
+## Separation of Concerns
+
+Each module follows a clear layered architecture:
+
+### 1. Controllers (Presentation Layer)
+
+Controllers handle HTTP requests and responses. They are thin layers that delegate business logic to services.
+
+<CodeGroup>
+```typescript src/modules/campaigns/campaigns.controller.ts
+import { Body, Controller, Post } from '@nestjs/common';
+import { ApiOperation, ApiTags, ApiResponse } from '@nestjs/swagger';
+import { CampaignsService } from './campaigns.service';
+import { CreateCampaignDto } from './dto/create-campaign.dto';
+
+@ApiTags('Campañas') 
+@Controller('campaigns')
+export class CampaignsController {
+  constructor(private readonly campaignsService: CampaignsService) {}
+
+  @Post()
+  @ApiOperation({ summary: 'Programar una nueva campaña con mensajes' })
+  @ApiResponse({ status: 201, description: 'Campaña creada y programada exitosamente.' })
+  @ApiResponse({ status: 400, description: 'Datos de entrada inválidos (mensajes vacíos, etc).' })
+  create(@Body() createCampaignDto: CreateCampaignDto) {
+    return this.campaignsService.create(createCampaignDto);
+  }
+}
+```
+</CodeGroup>
+
+**Responsibilities:**
+- Route definition (`@Controller`, `@Post`, `@Get`, etc.)
+- Request validation via DTOs
+- OpenAPI/Swagger documentation
+- Delegating to services
+
+### 2. Services (Business Logic Layer)
+
+Services contain the core business logic and orchestrate operations.
+
+<CodeGroup>
+```typescript src/modules/campaigns/campaigns.service.ts
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { DataSource, EntityManager } from 'typeorm';
+import { CreateCampaignDto } from './dto/create-campaign.dto';
+import { Campaign } from '../../entities/campaign.entity';
+import { Message } from '../../entities/message.entity';
+
+@Injectable()
+export class CampaignsService {
+  constructor(private readonly dataSource: DataSource) {}
+
+  async create(createCampaignDto: CreateCampaignDto) {
+    return await this.dataSource.transaction(async (manager) => {
+      try {
+        return await this.createCampaignTransaction(manager, createCampaignDto);
+      } catch (error) {
+        throw new InternalServerErrorException('Error al crear la campaña', error.message);
+      }
+    });
+  }
+
+  private async createCampaignTransaction(
+    manager: EntityManager, 
+    dto: CreateCampaignDto
+  ) {
+    const { name, scheduledAt, userId, messages } = dto;
+
+    const newCampaign = Campaign.create(name, new Date(scheduledAt), userId);
+    const savedCampaign = await manager.save(newCampaign);
+
+    const messagesEntities = messages.map(msgText => 
+      Message.create(msgText, savedCampaign)
+    );
+    await manager.save(messagesEntities);
+
+    return {
+      message: 'Campaña creada exitosamente',
+      campaignId: savedCampaign.id,
+      totalMessages: messagesEntities.length,
+    };
+  }
+}
+```
+</CodeGroup>
+
+**Responsibilities:**
+- Business logic implementation
+- Transaction management
+- Data validation and transformation
+- Error handling
+
+### 3. DTOs (Data Transfer Objects)
+
+DTOs define the shape of data for API requests and provide validation rules.
+
+<CodeGroup>
+```typescript src/modules/campaigns/dto/create-campaign.dto.ts
+import { IsNotEmpty, IsString, IsInt, IsArray, ArrayMinSize, IsDateString, MinLength } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
+
+export class CreateCampaignDto {
+  @ApiProperty({ example: 'Campaña Navidad 2026' })
+  @IsNotEmpty()
+  @IsString()
+  name: string;
+
+  @ApiProperty({ example: '2026-12-24 10:00:00' })
+  @IsNotEmpty()
+  @IsDateString()
+  scheduledAt: string;
+
+  @ApiProperty({ example: 1, description: 'ID del usuario que crea la campaña' })
+  @IsNotEmpty()
+  @IsInt()
+  userId: number;
+
+  @ApiProperty({ example: ['Oferta Exclusiva', 'Descuento 50%'], type: [String] })
+  @IsArray()
+  @ArrayMinSize(1, { message: 'La campaña debe tener al menos un mensaje' })
+  @IsString({ each: true })
+  @IsNotEmpty({ each: true, message: 'No se permiten mensajes vacíos' })
+  @MinLength(5, { each: true, message: 'Cada mensaje debe tener al menos 5 caracteres' })
+  @Transform(({ value }) => Array.isArray(value) ? value.map(v => typeof v === 'string' ? v.trim() : v) : value)
+  messages: string[];
+}
+```
+</CodeGroup>
+
+**Responsibilities:**
+- Input validation using `class-validator`
+- Type safety
+- API documentation via `@ApiProperty`
+- Data transformation using `class-transformer`
+
+### 4. Entities (Domain Layer)
+
+Entities represent the core domain models and database tables.
+
+<CodeGroup>
+```typescript src/entities/campaign.entity.ts
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
+import { User } from './user.entity';
+import { Message } from './message.entity';
+import { Status } from '../common/enums/status.enum';
+
+@Entity('campania')
+export class Campaign {
+  @PrimaryGeneratedColumn({ name: 'idCampania' })
+  id: number;
+
+  @Column({ name: 'nombre', length: 200 })
+  name: string;
+
+  @Column({ name: 'fechaHoraProgramacion', type: 'datetime' })
+  scheduledAt: Date;
+
+  @Column({ name: 'estado', type: 'tinyint', width: 1, default: Status.ACTIVE })
+  status: Status;
+
+  @ManyToOne(() => User, (user) => user.campaigns)
+  @JoinColumn({ name: 'idUsuario' })
+  user: User;
+
+  @Column({ name: 'idUsuario' })
+  userId: number;
+
+  @OneToMany(() => Message, (message) => message.campaign)
+  messages: Message[];
+
+  static create(name: string, scheduledAt: Date, userId: number): Campaign {
+    const campaign = new Campaign();
+    campaign.name = name;
+    campaign.scheduledAt = scheduledAt;
+    campaign.userId = userId;
+    campaign.status = Status.ACTIVE;
+    return campaign;
+  }
+}
+```
+</CodeGroup>
+
+**Responsibilities:**
+- Database schema definition
+- Entity relationships (OneToMany, ManyToOne)
+- Factory methods for entity creation
+- Domain logic encapsulation
+
+## Configuration Management
+
+The application uses NestJS ConfigModule with environment variables:
+
+<CodeGroup>
+```typescript src/app.module.ts
+import { Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      ignoreEnvFile: true, // Bun loads .env natively
+      isGlobal: true,      // ConfigService available app-wide
+    }),
+    
+    TypeOrmModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        type: 'mysql',
+        host: configService.get<string>('DB_HOST'),
+        port: configService.get<number>('DB_PORT'),
+        username: configService.get<string>('DB_USERNAME'),
+        password: configService.get<string>('DB_PASSWORD'),
+        database: configService.get<string>('DB_NAME'),
+        entities: [__dirname + '/**/*.entity{.ts,.js}'],
+        synchronize: configService.get<string>('DB_SYNCHRONIZE') === 'true',
+        logging: configService.get<string>('DB_SYNCHRONIZE') === 'true',
+      }),
+    }),
+  ],
+})
+export class AppModule {}
+```
+</CodeGroup>
+
+<Warning>
+  **Production Note:** The `synchronize` option automatically updates database schema based on entities. This should be disabled in production and migrations should be used instead.
+</Warning>
+
+## Benefits of This Architecture
+
+1. **Testability**: Each layer can be tested independently with mocked dependencies
+2. **Maintainability**: Clear separation makes code easier to understand and modify
+3. **Scalability**: New features can be added as modules without affecting existing code
+4. **Flexibility**: External dependencies (database, HTTP) can be swapped without changing business logic
+5. **Type Safety**: TypeScript and DTOs provide compile-time type checking
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Database Schema" icon="database" href="/concepts/database-schema">
+    Explore the entity relationships and database structure
+  </Card>
+  <Card title="Transaction Handling" icon="arrows-rotate" href="/concepts/transactions">
+    Learn how ACID transactions ensure data consistency
+  </Card>
+</CardGroup>

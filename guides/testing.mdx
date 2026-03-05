@@ -1,0 +1,641 @@
+---
+title: 'Testing Guide'
+description: 'Comprehensive guide for writing and running tests with Jest in the Sinapsis API'
+icon: 'flask'
+---
+
+## Overview
+
+The Sinapsis Marketing Campaigns API includes a robust testing suite using **Jest** and **@nestjs/testing**. The test coverage includes:
+
+- **Unit Tests** for services (business logic)
+- **DTO Validation Tests** (class-validator)
+- **Repository Mocking** (TypeORM)
+- **Transaction Simulation** (QueryRunner)
+- **Error Handling** (SQL errors, exceptions)
+
+<Note>
+  The project follows the **Arrange-Act-Assert (AAA)** pattern for test structure, making tests readable and maintainable.
+</Note>
+
+## Running Tests
+
+The project provides several test commands:
+
+<CodeGroup>
+  ```bash Run All Tests
+  bun run test
+  ```
+
+  ```bash Watch Mode
+  bun run test:watch
+  ```
+
+  ```bash Coverage Report
+  bun run test:cov
+  ```
+
+  ```bash Debug Tests
+  bun run test:debug
+  ```
+
+  ```bash E2E Tests
+  bun run test:e2e
+  ```
+</CodeGroup>
+
+### Test Command Details
+
+**Standard Test Run**
+```bash
+bun run test
+```
+Executes all `*.spec.ts` files once and displays results.
+
+**Watch Mode**
+```bash
+bun run test:watch
+```
+Re-runs tests automatically when files change. Great for TDD workflow.
+
+**Coverage Report**
+```bash
+bun run test:cov
+```
+Generates a detailed coverage report in the `coverage/` directory. Open `coverage/lcov-report/index.html` in your browser for a visual report.
+
+**Debug Mode**
+```bash
+bun run test:debug
+```
+Runs tests with Node inspector enabled. Connect with Chrome DevTools at `chrome://inspect`.
+
+## Jest Configuration
+
+The Jest configuration is defined in `package.json`:
+
+```json
+"jest": {
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "rootDir": "src",
+  "testRegex": ".*\\.spec\\.ts$",
+  "transform": {
+    "^.+\\.(t|j)s$": "ts-jest"
+  },
+  "collectCoverageFrom": ["**/*.(t|j)s"],
+  "coverageDirectory": "../coverage",
+  "testEnvironment": "node"
+}
+```
+
+**Key Settings:**
+- Tests must be named `*.spec.ts`
+- Root directory for tests is `src/`
+- Uses `ts-jest` for TypeScript support
+- Node environment (not browser/jsdom)
+
+## Test Structure
+
+All tests follow the **Arrange-Act-Assert** pattern:
+
+```typescript
+it('should create a user successfully', async () => {
+  // ARRANGE - Set up test data and mocks
+  const mockDto = { username: 'test', clientId: 1 };
+  mockRepository.save.mockResolvedValue({ id: 1, ...mockDto });
+
+  // ACT - Execute the function being tested
+  const result = await service.create(mockDto);
+
+  // ASSERT - Verify the outcome
+  expect(result).toEqual({ id: 1, username: 'test', clientId: 1 });
+  expect(mockRepository.save).toHaveBeenCalled();
+});
+```
+
+## Service Testing
+
+Service tests validate business logic, error handling, and repository interactions.
+
+### Example: Users Service Test
+
+From `src/modules/users/users.service.spec.ts`:
+
+```typescript
+import { Test, TestingModule } from '@nestjs/testing';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { 
+  BadRequestException, 
+  InternalServerErrorException, 
+  NotFoundException 
+} from '@nestjs/common';
+import { UsersService } from './users.service';
+import { User } from '../../entities/user.entity';
+import { Status } from '../../common/enums/status.enum';
+
+const mockUser = {
+  id: 1,
+  username: 'testuser',
+  clientId: 1,
+  status: Status.ACTIVE,
+  client: { id: 1, name: 'Empresa Test' }
+};
+
+const mockUserRepository = {
+  create: jest.fn().mockReturnValue(mockUser),
+  save: jest.fn(),
+  findAndCount: jest.fn(),
+  findOne: jest.fn(),
+};
+
+describe('UsersService', () => {
+  let service: UsersService;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        UsersService,
+        {
+          provide: getRepositoryToken(User),
+          useValue: mockUserRepository,
+        },
+      ],
+    }).compile();
+
+    service = module.get<UsersService>(UsersService);
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('should be defined', () => {
+    expect(service).toBeDefined();
+  });
+
+  describe('create', () => {
+    it('should create a user successfully', async () => {
+      // Arrange
+      const mockCreateDto = { username: 'nuevo', clientId: 1 };
+      mockUserRepository.save.mockResolvedValue(mockUser);
+
+      // Act
+      const result = await service.create(mockCreateDto);
+
+      // Assert
+      expect(result).toEqual(mockUser);
+      expect(mockUserRepository.save).toHaveBeenCalled();
+      const saveCallArg = mockUserRepository.save.mock.calls[0][0];
+      expect(saveCallArg.status).toBe(Status.ACTIVE);
+    });
+
+    it('should throw BadRequestException if client does not exist (Error 1452)', async () => {
+      // Arrange: Simulate MySQL Foreign Key error
+      const mockCreateDto = { username: 'nuevo', clientId: 999 };
+      mockUserRepository.save.mockRejectedValue({ errno: 1452 });
+
+      // Act & Assert
+      await expect(service.create(mockCreateDto)).rejects.toThrow(
+        BadRequestException
+      );
+    });
+
+    it('should throw InternalServerErrorException for other errors', async () => {
+      // Arrange: Generic DB error
+      const mockCreateDto = { username: 'nuevo', clientId: 1 };
+      mockUserRepository.save.mockRejectedValue(
+        new Error('DB Connection failed')
+      );
+
+      // Act & Assert
+      await expect(service.create(mockCreateDto)).rejects.toThrow(
+        InternalServerErrorException
+      );
+    });
+  });
+});
+```
+
+### Key Testing Concepts
+
+<Steps>
+  <Step title="Mock Repository Setup">
+    Use `getRepositoryToken()` to mock TypeORM repositories:
+
+    ```typescript
+    {
+      provide: getRepositoryToken(User),
+      useValue: mockUserRepository,
+    }
+    ```
+  </Step>
+
+  <Step title="Mock Return Values">
+    Configure what mocked methods should return:
+
+    ```typescript
+    mockRepository.save.mockResolvedValue(mockUser);
+    mockRepository.findOne.mockResolvedValue(null);
+    mockRepository.save.mockRejectedValue(new Error('DB Error'));
+    ```
+  </Step>
+
+  <Step title="Test Database Errors">
+    Simulate specific MySQL error codes:
+
+    ```typescript
+    // Foreign key constraint violation
+    mockRepository.save.mockRejectedValue({ errno: 1452 });
+    ```
+  </Step>
+
+  <Step title="Verify Method Calls">
+    Ensure methods were called with correct arguments:
+
+    ```typescript
+    expect(mockRepository.save).toHaveBeenCalled();
+    expect(mockRepository.save).toHaveBeenCalledTimes(2);
+    const callArg = mockRepository.save.mock.calls[0][0];
+    expect(callArg.status).toBe(Status.ACTIVE);
+    ```
+  </Step>
+</Steps>
+
+## Transaction Testing
+
+Testing services that use database transactions requires mocking the QueryRunner.
+
+### Example: Campaigns Service with Transactions
+
+From `src/modules/campaigns/campaigns.service.spec.ts`:
+
+```typescript
+import { Test, TestingModule } from '@nestjs/testing';
+import { DataSource, QueryRunner, EntityManager } from 'typeorm';
+import { CampaignsService } from './campaigns.service';
+import { CreateCampaignDto } from './dto/create-campaign.dto';
+import { InternalServerErrorException } from '@nestjs/common';
+
+// Mock Data
+const mockCampaignDto: CreateCampaignDto = {
+  name: 'Test Campaign',
+  scheduledAt: '2026-12-25T10:00:00Z',
+  userId: 1,
+  messages: ['Msg 1', 'Msg 2'],
+};
+
+// Mock EntityManager
+const mockEntityManager = {
+  save: jest.fn(),
+} as unknown as EntityManager;
+
+// Mock QueryRunner
+const mockQueryRunner = {
+  connect: jest.fn(),
+  startTransaction: jest.fn(),
+  commitTransaction: jest.fn(),
+  rollbackTransaction: jest.fn(),
+  release: jest.fn(),
+  manager: mockEntityManager,
+} as unknown as QueryRunner;
+
+// Mock DataSource
+const mockDataSource = {
+  createQueryRunner: jest.fn().mockReturnValue(mockQueryRunner),
+  transaction: jest.fn().mockImplementation(async (cb) => {
+    return cb(mockEntityManager);
+  })
+};
+
+describe('CampaignsService', () => {
+  let service: CampaignsService;
+  let dataSource: DataSource;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        CampaignsService,
+        {
+          provide: DataSource,
+          useValue: mockDataSource,
+        },
+      ],
+    }).compile();
+
+    service = module.get<CampaignsService>(CampaignsService);
+    dataSource = module.get<DataSource>(DataSource);
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe('create', () => {
+    it('should create a campaign and messages successfully (COMMIT)', async () => {
+      // ARRANGE
+      const savedCampaign = { id: 1, ...mockCampaignDto };
+      (mockEntityManager.save as jest.Mock)
+        .mockResolvedValueOnce(savedCampaign)
+        .mockResolvedValueOnce([]);
+
+      // ACT
+      const result = await service.create(mockCampaignDto);
+
+      // ASSERT
+      expect(mockDataSource.transaction).toHaveBeenCalled();
+      expect(mockEntityManager.save).toHaveBeenCalledTimes(2);
+      expect(result).toEqual({
+        message: 'Campaña creada exitosamente',
+        campaignId: 1,
+        totalMessages: 2,
+      });
+    });
+
+    it('should rollback transaction if save fails', async () => {
+      // ARRANGE - Simulate DB failure
+      (mockEntityManager.save as jest.Mock).mockRejectedValue(
+        new Error('DB Error')
+      );
+
+      // ACT & ASSERT
+      await expect(service.create(mockCampaignDto)).rejects.toThrow(
+        InternalServerErrorException
+      );
+    });
+  });
+});
+```
+
+<Warning>
+  When testing transactions, ensure you mock both the `DataSource` and `QueryRunner` to simulate commit/rollback behavior.
+</Warning>
+
+## DTO Validation Testing
+
+Test data validation rules defined with `class-validator` decorators.
+
+### Example: Campaign DTO Validation
+
+From `src/modules/campaigns/dto/create-campaign.dto.spec.ts`:
+
+```typescript
+import { validate } from 'class-validator';
+import { CreateCampaignDto } from './create-campaign.dto';
+
+describe('CreateCampaignDto', () => {
+  
+  // Helper to create a valid DTO
+  const generateValidDto = () => {
+    const dto = new CreateCampaignDto();
+    dto.name = 'Valid Campaign';
+    dto.scheduledAt = '2026-12-25T10:00:00Z';
+    dto.userId = 1;
+    dto.messages = ['Valid message'];
+    return dto;
+  };
+
+  it('should pass if all data is correct', async () => {
+    const dto = generateValidDto();
+    const errors = await validate(dto);
+    expect(errors.length).toBe(0);
+  });
+
+  it('should fail if a message is an empty string', async () => {
+    const dto = generateValidDto();
+    dto.messages = ['Good message', ''];
+
+    const errors = await validate(dto);
+    
+    expect(errors.length).toBeGreaterThan(0);
+    const messageError = errors.find(err => err.property === 'messages');
+    expect(messageError).toBeDefined();
+    expect(messageError.constraints).toHaveProperty('isNotEmpty');
+  });
+
+  it('should fail if a message has less than 5 characters', async () => {
+    const dto = generateValidDto();
+    dto.messages = ['Hi'];
+
+    const errors = await validate(dto);
+    
+    expect(errors.length).toBeGreaterThan(0);
+    const messageError = errors.find(err => err.property === 'messages');
+    expect(messageError).toBeDefined();
+    expect(messageError.constraints).toHaveProperty('minLength');
+  });
+
+  it('should fail if the messages array is empty', async () => {
+    const dto = generateValidDto();
+    dto.messages = [];
+
+    const errors = await validate(dto);
+    
+    expect(errors.length).toBeGreaterThan(0);
+    const messageError = errors.find(err => err.property === 'messages');
+    expect(messageError.constraints).toHaveProperty('arrayMinSize');
+  });
+});
+```
+
+### DTO Testing Best Practices
+
+<Steps>
+  <Step title="Create a Valid DTO Helper">
+    Start with a function that returns a fully valid DTO:
+
+    ```typescript
+    const generateValidDto = () => {
+      const dto = new CreateCampaignDto();
+      dto.name = 'Valid Campaign';
+      dto.scheduledAt = '2026-12-25T10:00:00Z';
+      dto.userId = 1;
+      dto.messages = ['Valid message'];
+      return dto;
+    };
+    ```
+  </Step>
+
+  <Step title="Test One Validation Rule Per Test">
+    Each test should focus on a single validation failure:
+
+    ```typescript
+    it('should fail if name is too short', async () => {
+      const dto = generateValidDto();
+      dto.name = 'AB'; // Too short
+      const errors = await validate(dto);
+      expect(errors.length).toBeGreaterThan(0);
+    });
+    ```
+  </Step>
+
+  <Step title="Verify Specific Constraint Names">
+    Check which validator failed:
+
+    ```typescript
+    const nameError = errors.find(err => err.property === 'name');
+    expect(nameError.constraints).toHaveProperty('minLength');
+    ```
+  </Step>
+</Steps>
+
+## Testing Patterns
+
+### Testing Pagination
+
+```typescript
+describe('findAll', () => {
+  it('should return paginated data with metadata', async () => {
+    // Arrange
+    const mockData = [mockUser];
+    const mockTotal = 1;
+    mockUserRepository.findAndCount.mockResolvedValue([mockData, mockTotal]);
+    
+    const paginationDto = { page: 1, limit: 10 };
+
+    // Act
+    const result = await service.findAll(paginationDto);
+
+    // Assert
+    expect(result.data).toEqual(mockData);
+    expect(result.meta.total).toBe(1);
+    expect(result.meta.lastPage).toBe(1);
+  });
+});
+```
+
+### Testing Soft Deletes
+
+```typescript
+describe('remove', () => {
+  it('should change status to INACTIVE (Soft Delete)', async () => {
+    // Arrange
+    mockUserRepository.findOne.mockResolvedValue({
+      ...mockUser,
+      status: Status.ACTIVE
+    });
+    mockUserRepository.save.mockImplementation((user) => 
+      Promise.resolve(user)
+    );
+
+    // Act
+    const result = await service.remove(1);
+
+    // Assert
+    expect(result.status).toBe(Status.INACTIVE);
+    expect(mockUserRepository.save).toHaveBeenCalled();
+  });
+});
+```
+
+### Testing NotFoundExceptions
+
+```typescript
+describe('findOne', () => {
+  it('should throw NotFoundException if user does not exist', async () => {
+    mockUserRepository.findOne.mockResolvedValue(null);
+
+    await expect(service.findOne(999)).rejects.toThrow(NotFoundException);
+  });
+});
+```
+
+## Coverage Goals
+
+The project aims for high test coverage:
+
+- **Services:** 80%+ coverage
+- **DTOs:** 100% validation coverage
+- **Critical paths:** Transaction logic, error handling
+
+### Viewing Coverage
+
+Generate and view the coverage report:
+
+```bash
+bun run test:cov
+open coverage/lcov-report/index.html
+```
+
+The report shows:
+- **Statements:** % of code statements executed
+- **Branches:** % of conditional branches tested
+- **Functions:** % of functions called
+- **Lines:** % of code lines covered
+
+<Tip>
+  Focus on testing critical business logic and edge cases. Don't aim for 100% coverage on boilerplate code.
+</Tip>
+
+## Writing New Tests
+
+When adding a new feature, follow these steps:
+
+<Steps>
+  <Step title="Create the spec file">
+    Name it `feature.service.spec.ts` or `feature.dto.spec.ts`
+  </Step>
+
+  <Step title="Set up test module">
+    Use `@nestjs/testing` to create a testing module with mocked dependencies
+  </Step>
+
+  <Step title="Write test cases">
+    Cover success cases, error cases, and edge cases
+  </Step>
+
+  <Step title="Run tests">
+    ```bash
+    bun run test:watch
+    ```
+  </Step>
+
+  <Step title="Check coverage">
+    ```bash
+    bun run test:cov
+    ```
+  </Step>
+</Steps>
+
+## Common Testing Utilities
+
+### Clearing Mocks Between Tests
+
+Always clear mocks in `afterEach`:
+
+```typescript
+afterEach(() => {
+  jest.clearAllMocks();
+});
+```
+
+### Testing Async Code
+
+Use `async/await` for all async tests:
+
+```typescript
+it('should create user', async () => {
+  const result = await service.create(dto);
+  expect(result).toBeDefined();
+});
+```
+
+### Testing Exceptions
+
+Use `rejects.toThrow()` for async exceptions:
+
+```typescript
+await expect(service.create(invalidDto)).rejects.toThrow(
+  BadRequestException
+);
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Local Development" icon="code" href="/guides/local-development">
+    Set up your development environment
+  </Card>
+  <Card title="Deployment" icon="rocket" href="/guides/deployment">
+    Deploy to AWS Lambda
+  </Card>
+</CardGroup>

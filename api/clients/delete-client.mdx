@@ -1,0 +1,87 @@
+---
+title: 'Delete Client'
+api: 'DELETE /api/clients/:id'
+description: 'Deactivate a client using soft delete (marks as inactive)'
+---
+
+## Request
+
+### Path Parameters
+
+<ParamField path="id" type="number" required>
+  The unique identifier of the client to deactivate. Must be a valid integer.
+  
+  **Example:** `1`
+</ParamField>
+
+## Response
+
+<ResponseField name="id" type="number">
+  Client's unique identifier
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Client's business name or name
+</ResponseField>
+
+<ResponseField name="status" type="number">
+  Client status after deletion. Will be `0` (inactive) after soft delete.
+</ResponseField>
+
+<Info>
+  This endpoint performs a soft delete, meaning the client record is not physically removed from the database. Instead, the status is changed to `0` (inactive). The client data is preserved and can potentially be reactivated later.
+</Info>
+
+## Error Responses
+
+### 400 Bad Request
+
+Returned when the `id` parameter is not a valid integer.
+
+```json
+{
+  "statusCode": 400,
+  "message": "Validation failed (numeric string is expected)",
+  "error": "Bad Request"
+}
+```
+
+### 404 Not Found
+
+Returned when a client with the specified ID does not exist.
+
+```json
+{
+  "statusCode": 404,
+  "message": "Cliente con ID {id} no encontrado",
+  "error": "Not Found"
+}
+```
+
+### 500 Internal Server Error
+
+Returned when an unexpected database error occurs while deactivating the client.
+
+## Example Request
+
+```bash cURL
+curl -X DELETE https://api.example.com/api/clients/1
+```
+
+## Example Response
+
+```json 200 OK
+{
+  "id": 1,
+  "name": "Empresa SAC",
+  "status": 0
+}
+```
+
+```json 404 Not Found
+{
+  "statusCode": 404,
+  "message": "Cliente con ID 999 no encontrado",
+  "error": "Not Found"
+}
+```

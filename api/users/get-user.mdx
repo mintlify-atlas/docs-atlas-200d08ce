@@ -1,0 +1,88 @@
+---
+title: 'Get User'
+api: 'GET /api/users/:id'
+---
+
+Retrieve detailed information about a specific user by ID.
+
+## Path Parameters
+
+<ParamField path="id" type="number" required>
+  The unique identifier of the user to retrieve.
+  
+  **Example:** `5`
+</ParamField>
+
+## Response
+
+<ResponseField name="id" type="number">
+  The unique identifier of the user.
+</ResponseField>
+
+<ResponseField name="username" type="string">
+  The username of the user.
+</ResponseField>
+
+<ResponseField name="status" type="number">
+  The status of the user. `1` for active, `0` for inactive.
+</ResponseField>
+
+<ResponseField name="clientId" type="number">
+  The ID of the client associated with the user.
+</ResponseField>
+
+<ResponseField name="client" type="object">
+  The client object associated with the user, including all client details.
+</ResponseField>
+
+## Error Responses
+
+<ResponseField name="404" type="error">
+  **Not Found** - User with the specified ID does not exist.
+  
+  **Message:** `Usuario con ID {id} no encontrado`
+</ResponseField>
+
+<ResponseField name="400" type="error">
+  **Bad Request** - Invalid ID format (must be a valid integer).
+</ResponseField>
+
+## Example Request
+
+```bash cURL
+curl -X GET https://api.example.com/api/users/5 \
+  -H "Content-Type: application/json"
+```
+
+## Example Response
+
+```json 200 - Success
+{
+  "id": 5,
+  "username": "juan.perez",
+  "status": 1,
+  "clientId": 1,
+  "client": {
+    "id": 1,
+    "name": "Acme Corporation",
+    "status": 1,
+    "createdAt": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+```json 404 - User Not Found
+{
+  "statusCode": 404,
+  "message": "Usuario con ID 999 no encontrado",
+  "error": "Not Found"
+}
+```
+
+```json 400 - Invalid ID Format
+{
+  "statusCode": 400,
+  "message": "Validation failed (numeric string is expected)",
+  "error": "Bad Request"
+}
+```

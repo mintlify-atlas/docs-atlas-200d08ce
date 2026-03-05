@@ -1,0 +1,447 @@
+---
+title: 'Database Schema'
+description: 'Complete database schema documentation with entities, relationships, and field definitions'
+---
+
+## Overview
+
+The Sinapsis Marketing Campaigns API uses a relational MySQL database with four core entities that model the marketing campaign domain. The schema is defined using **TypeORM decorators** and follows a normalized structure with clear foreign key relationships.
+
+## Entity Relationship Diagram
+
+The database schema follows this relationship structure:
+
+```
+┌─────────────┐         ┌─────────────┐         ┌─────────────┐         ┌─────────────┐
+│   Client    │         │    User     │         │  Campaign   │         │   Message   │
+├─────────────┤         ├─────────────┤         ├─────────────┤         ├─────────────┤
+│ idCliente   │────<    │ idUsuario   │────<    │ idCampania  │────<    │ idMensaje   │
+│ nombre      │    1:N  │ usuario     │    1:N  │ nombre      │    1:N  │ mensaje     │
+│ estado      │         │ idCliente   │         │ fechaHora   │         │ idCampania  │
+└─────────────┘         │ estado      │         │ idUsuario   │         │ estadoEnvio │
+                        └─────────────┘         │ estado      │         │ fechaHora   │
+                                                └─────────────┘         │ estado      │
+                                                                        └─────────────┘
+```
+
+### Relationship Summary
+
+- **Client** → **User**: One-to-Many (A client has many users)
+- **User** → **Campaign**: One-to-Many (A user creates many campaigns)
+- **Campaign** → **Message**: One-to-Many (A campaign contains many messages)
+
+## Entity Definitions
+
+### Client Entity
+
+The `Client` entity represents organizations or companies that use the marketing campaign system.
+
+<CodeGroup>
+```typescript src/entities/client.entity.ts
+import { Entity, PrimaryGeneratedColumn, Column, OneToMany } from 'typeorm';
+import { User } from './user.entity';
+import { Status } from '../common/enums/status.enum';
+
+@Entity('cliente')
+export class Client {
+  @PrimaryGeneratedColumn({ name: 'idCliente' })
+  id: number;
+
+  @Column({ name: 'nombre', length: 100 })
+  name: string;
+
+  @Column({ name: 'estado', type: 'tinyint', width: 1, default: Status.ACTIVE })
+  status: Status;
+
+  @OneToMany(() => User, (user) => user.client)
+  users: User[];
+
+  static create(name: string): Client {
+    const client = new Client();
+    client.name = name;
+    client.status = Status.ACTIVE;
+    return client;
+  }
+}
+```
+</CodeGroup>
+
+#### Fields
+
+| Field | Database Column | Type | Description | Constraints |
+|-------|----------------|------|-------------|-------------|
+| `id` | `idCliente` | `int` | Primary key | Auto-increment |
+| `name` | `nombre` | `varchar(100)` | Client organization name | Required |
+| `status` | `estado` | `tinyint(1)` | Active/Inactive status | Default: 1 (ACTIVE) |
+| `users` | - | `User[]` | Related users (virtual) | OneToMany relationship |
+
+<Info>
+  The `static create()` factory method provides a clean way to instantiate new clients with default values.
+</Info>
+
+### User Entity
+
+The `User` entity represents individuals who create and manage marketing campaigns within a client organization.
+
+<CodeGroup>
+```typescript src/entities/user.entity.ts
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
+import { Client } from './client.entity';
+import { Campaign } from './campaign.entity';
+import { Status } from '../common/enums/status.enum';
+
+@Entity('usuario')
+export class User {
+  @PrimaryGeneratedColumn({ name: 'idUsuario' })
+  id: number;
+
+  @Column({ name: 'usuario', length: 30 })
+  username: string;
+
+  @Column({ name: 'estado', type: 'tinyint', width: 1, default: Status.ACTIVE })
+  status: Status;
+
+  @ManyToOne(() => Client, (client) => client.users)
+  @JoinColumn({ name: 'idCliente' })
+  client: Client;
+
+  @Column({ name: 'idCliente' })
+  clientId: number;
+
+  @OneToMany(() => Campaign, (campaign) => campaign.user)
+  campaigns: Campaign[];
+
+  static create(username: string, clientId: number): User {
+    const user = new User();
+    user.username = username;
+    user.clientId = clientId;
+    user.status = Status.ACTIVE;
+    return user;
+  }
+}
+```
+</CodeGroup>
+
+#### Fields
+
+| Field | Database Column | Type | Description | Constraints |
+|-------|----------------|------|-------------|-------------|
+| `id` | `idUsuario` | `int` | Primary key | Auto-increment |
+| `username` | `usuario` | `varchar(30)` | User login name | Required |
+| `status` | `estado` | `tinyint(1)` | Active/Inactive status | Default: 1 (ACTIVE) |
+| `clientId` | `idCliente` | `int` | Foreign key to Client | Required |
+| `client` | - | `Client` | Parent client (virtual) | ManyToOne relationship |
+| `campaigns` | - | `Campaign[]` | Created campaigns (virtual) | OneToMany relationship |
+
+<Note>
+  The `clientId` column is explicitly defined alongside the `@ManyToOne` relationship to facilitate direct queries without joining.
+</Note>
+
+### Campaign Entity
+
+The `Campaign` entity represents scheduled marketing campaigns with associated messages.
+
+<CodeGroup>
+```typescript src/entities/campaign.entity.ts
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
+import { User } from './user.entity';
+import { Message } from './message.entity';
+import { Status } from '../common/enums/status.enum';
+
+@Entity('campania')
+export class Campaign {
+  @PrimaryGeneratedColumn({ name: 'idCampania' })
+  id: number;
+
+  @Column({ name: 'nombre', length: 200 })
+  name: string;
+
+  @Column({ name: 'fechaHoraProgramacion', type: 'datetime' })
+  scheduledAt: Date;
+
+  @Column({ name: 'estado', type: 'tinyint', width: 1, default: Status.ACTIVE })
+  status: Status;
+
+  @ManyToOne(() => User, (user) => user.campaigns)
+  @JoinColumn({ name: 'idUsuario' })
+  user: User;
+
+  @Column({ name: 'idUsuario' })
+  userId: number;
+
+  @OneToMany(() => Message, (message) => message.campaign)
+  messages: Message[];
+
+  static create(name: string, scheduledAt: Date, userId: number): Campaign {
+    const campaign = new Campaign();
+    campaign.name = name;
+    campaign.scheduledAt = scheduledAt;
+    campaign.userId = userId;
+    campaign.status = Status.ACTIVE;
+    return campaign;
+  }
+}
+```
+</CodeGroup>
+
+#### Fields
+
+| Field | Database Column | Type | Description | Constraints |
+|-------|----------------|------|-------------|-------------|
+| `id` | `idCampania` | `int` | Primary key | Auto-increment |
+| `name` | `nombre` | `varchar(200)` | Campaign name | Required |
+| `scheduledAt` | `fechaHoraProgramacion` | `datetime` | Scheduled send time | Required |
+| `status` | `estado` | `tinyint(1)` | Active/Inactive status | Default: 1 (ACTIVE) |
+| `userId` | `idUsuario` | `int` | Foreign key to User | Required |
+| `user` | - | `User` | Campaign creator (virtual) | ManyToOne relationship |
+| `messages` | - | `Message[]` | Campaign messages (virtual) | OneToMany relationship |
+
+### Message Entity
+
+The `Message` entity represents individual SMS messages within a campaign, including delivery status tracking.
+
+<CodeGroup>
+```typescript src/entities/message.entity.ts
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+import { Campaign } from './campaign.entity';
+import { ShippingStatus } from '../common/enums/shippingStatus.enum';
+import { Status } from '../common/enums/status.enum';
+
+@Entity('mensaje')
+export class Message {
+  @PrimaryGeneratedColumn({ name: 'idMensaje' })
+  id: number;
+
+  @Column({ name: 'mensaje', length: 160 })
+  text: string;
+
+  @Column({ name: 'estadoEnvio', type: 'int', default: ShippingStatus.PENDING })
+  shippingStatus: ShippingStatus;
+
+  @Column({ name: 'fechaHoraEnvio', type: 'datetime', nullable: true })
+  sentAt: Date;
+
+  @Column({ name: 'estado', type: 'tinyint', width: 1, default: Status.ACTIVE })
+  status: Status;
+
+  @ManyToOne(() => Campaign, (campaign) => campaign.messages)
+  @JoinColumn({ name: 'idCampania' })
+  campaign: Campaign;
+
+  @Column({ name: 'idCampania' })
+  campaignId: number;
+
+  static create(text: string, campaign: Campaign): Message {
+    const message = new Message();
+    message.text = text;
+    message.shippingStatus = ShippingStatus.PENDING;
+    message.campaign = campaign;
+    message.status = Status.ACTIVE;
+    return message;
+  }
+}
+```
+</CodeGroup>
+
+#### Fields
+
+| Field | Database Column | Type | Description | Constraints |
+|-------|----------------|------|-------------|-------------|
+| `id` | `idMensaje` | `int` | Primary key | Auto-increment |
+| `text` | `mensaje` | `varchar(160)` | SMS message content | Required, max 160 chars |
+| `shippingStatus` | `estadoEnvio` | `int` | Delivery status | Default: 1 (PENDING) |
+| `sentAt` | `fechaHoraEnvio` | `datetime` | Actual send timestamp | Nullable |
+| `status` | `estado` | `tinyint(1)` | Active/Inactive status | Default: 1 (ACTIVE) |
+| `campaignId` | `idCampania` | `int` | Foreign key to Campaign | Required |
+| `campaign` | - | `Campaign` | Parent campaign (virtual) | ManyToOne relationship |
+
+<Info>
+  The 160-character limit on `text` reflects SMS message size constraints.
+</Info>
+
+## Enumerations
+
+The schema uses TypeScript enums for type-safe status values.
+
+### Status Enum
+
+Used across all entities to indicate active/inactive state.
+
+<CodeGroup>
+```typescript src/common/enums/status.enum.ts
+export enum Status {
+  INACTIVE = 0, // 0: Inactivo
+  ACTIVE = 1,   // 1: Activo
+}
+```
+</CodeGroup>
+
+| Value | Name | Description |
+|-------|------|-------------|
+| `0` | `INACTIVE` | Entity is disabled/deleted |
+| `1` | `ACTIVE` | Entity is active |
+
+### ShippingStatus Enum
+
+Tracks the delivery status of individual messages.
+
+<CodeGroup>
+```typescript src/common/enums/shippingStatus.enum.ts
+export enum ShippingStatus {
+  PENDING = 1, // Pendiente
+  SENT = 2,    // Enviado
+  ERROR = 3,   // Error
+}
+```
+</CodeGroup>
+
+| Value | Name | Description |
+|-------|------|-------------|
+| `1` | `PENDING` | Message queued for sending |
+| `2` | `SENT` | Message successfully delivered |
+| `3` | `ERROR` | Delivery failed |
+
+## Foreign Key Relationships
+
+### Referential Integrity
+
+TypeORM manages foreign key constraints through decorators:
+
+<Tabs>
+  <Tab title="User → Client">
+    ```typescript
+    @ManyToOne(() => Client, (client) => client.users)
+    @JoinColumn({ name: 'idCliente' })
+    client: Client;
+
+    @Column({ name: 'idCliente' })
+    clientId: number;
+    ```
+    
+    - A user **must** belong to a client
+    - Deleting a client should cascade or prevent deletion if users exist
+  </Tab>
+  
+  <Tab title="Campaign → User">
+    ```typescript
+    @ManyToOne(() => User, (user) => user.campaigns)
+    @JoinColumn({ name: 'idUsuario' })
+    user: User;
+
+    @Column({ name: 'idUsuario' })
+    userId: number;
+    ```
+    
+    - A campaign **must** be created by a user
+    - Campaigns are owned by users who created them
+  </Tab>
+  
+  <Tab title="Message → Campaign">
+    ```typescript
+    @ManyToOne(() => Campaign, (campaign) => campaign.messages)
+    @JoinColumn({ name: 'idCampania' })
+    campaign: Campaign;
+
+    @Column({ name: 'idCampania' })
+    campaignId: number;
+    ```
+    
+    - A message **must** belong to a campaign
+    - Messages are atomically created with their parent campaign
+  </Tab>
+</Tabs>
+
+## Querying with Relationships
+
+TypeORM provides powerful query building capabilities for navigating relationships.
+
+### Example: Fetching Campaign Report Data
+
+<CodeGroup>
+```typescript src/modules/reports/reports.service.ts
+const query = this.messageRepository.createQueryBuilder('message')
+  .select('message.shippingStatus', 'shippingStatus')
+  .addSelect('COUNT(message.id)', 'count')
+  .innerJoin('message.campaign', 'campaign')
+  .innerJoin('campaign.user', 'user')
+  .where('message.status = :active', { active: Status.ACTIVE })
+  .andWhere('campaign.status = :active', { active: Status.ACTIVE })
+  .andWhere('user.status = :active', { active: Status.ACTIVE })
+  .andWhere('MONTH(campaign.scheduledAt) = :month', { month })
+  .groupBy('message.shippingStatus');
+
+const rawResults = await query.getRawMany();
+```
+</CodeGroup>
+
+This query demonstrates:
+- **Multi-level joins**: Message → Campaign → User
+- **Filtering**: Only active records across all entities
+- **Aggregation**: Counting messages by shipping status
+- **Date filtering**: Messages from a specific month
+
+<Warning>
+  Always filter by `status = Status.ACTIVE` to exclude soft-deleted records. The API uses soft deletes rather than physically removing data.
+</Warning>
+
+## Database Configuration
+
+The application connects to MySQL using TypeORM with environment-based configuration:
+
+<CodeGroup>
+```typescript src/app.module.ts
+TypeOrmModule.forRootAsync({
+  imports: [ConfigModule],
+  inject: [ConfigService],
+  useFactory: (configService: ConfigService) => ({
+    type: 'mysql',
+    host: configService.get<string>('DB_HOST'),
+    port: configService.get<number>('DB_PORT'),
+    username: configService.get<string>('DB_USERNAME'),
+    password: configService.get<string>('DB_PASSWORD'),
+    database: configService.get<string>('DB_NAME'),
+    entities: [__dirname + '/**/*.entity{.ts,.js}'],
+    synchronize: configService.get<string>('DB_SYNCHRONIZE') === 'true',
+    logging: configService.get<string>('DB_SYNCHRONIZE') === 'true',
+  }),
+})
+```
+</CodeGroup>
+
+### Environment Variables
+
+| Variable | Description | Example |
+|----------|-------------|--------|
+| `DB_HOST` | MySQL server host | `localhost` |
+| `DB_PORT` | MySQL server port | `3306` |
+| `DB_USERNAME` | Database user | `root` |
+| `DB_PASSWORD` | Database password | `password123` |
+| `DB_NAME` | Database name | `sinapsis_campaigns` |
+| `DB_SYNCHRONIZE` | Auto-sync schema (dev only) | `true` |
+
+<Warning>
+  **Production Warning:** Set `DB_SYNCHRONIZE=false` in production. Use migrations instead to manage schema changes safely.
+</Warning>
+
+## Best Practices
+
+1. **Explicit Foreign Key Columns**: Define both the relationship decorator (`@ManyToOne`) and explicit FK column (`@Column({ name: 'idCliente' })`) for query flexibility
+
+2. **Factory Methods**: Use static `create()` methods to ensure consistent entity initialization with defaults
+
+3. **Soft Deletes**: The `status` field enables soft deletion, preserving historical data
+
+4. **Timestamp Tracking**: Consider adding `@CreateDateColumn` and `@UpdateDateColumn` for audit trails (noted in client.entity.ts:19-20)
+
+5. **Type Safety**: Use TypeScript enums for status fields to prevent invalid values
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture Overview" icon="sitemap" href="/concepts/architecture">
+    Learn about the hexagonal architecture and module structure
+  </Card>
+  <Card title="Transaction Handling" icon="arrows-rotate" href="/concepts/transactions">
+    Understand ACID transactions in campaign creation
+  </Card>
+</CardGroup>

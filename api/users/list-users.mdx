@@ -1,0 +1,116 @@
+---
+title: 'List Users'
+api: 'GET /api/users'
+---
+
+Retrieve a paginated list of all users (both active and inactive).
+
+## Query Parameters
+
+<ParamField query="page" type="number" default="1">
+  The page number for pagination. Must be a positive integer.
+  
+  **Example:** `1`
+</ParamField>
+
+<ParamField query="limit" type="number" default="10">
+  The number of users to return per page. Must be a positive integer.
+  
+  **Example:** `10`
+</ParamField>
+
+## Response
+
+<ResponseField name="data" type="array">
+  Array of user objects.
+  
+  <ResponseField name="id" type="number">
+    The unique identifier of the user.
+  </ResponseField>
+  
+  <ResponseField name="username" type="string">
+    The username of the user.
+  </ResponseField>
+  
+  <ResponseField name="status" type="number">
+    The status of the user. `1` for active, `0` for inactive.
+  </ResponseField>
+  
+  <ResponseField name="clientId" type="number">
+    The ID of the client associated with the user.
+  </ResponseField>
+  
+  <ResponseField name="client" type="object">
+    The client object associated with the user, including client details.
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="meta" type="object">
+  Pagination metadata.
+  
+  <ResponseField name="total" type="number">
+    Total number of users across all pages.
+  </ResponseField>
+  
+  <ResponseField name="page" type="number">
+    Current page number.
+  </ResponseField>
+  
+  <ResponseField name="lastPage" type="number">
+    Total number of pages available.
+  </ResponseField>
+</ResponseField>
+
+## Example Request
+
+```bash cURL
+curl -X GET "https://api.example.com/api/users?page=1&limit=10" \
+  -H "Content-Type: application/json"
+```
+
+```bash cURL - Without Pagination Parameters
+curl -X GET https://api.example.com/api/users \
+  -H "Content-Type: application/json"
+```
+
+## Example Response
+
+```json 200 - Success
+{
+  "data": [
+    {
+      "id": 5,
+      "username": "juan.perez",
+      "status": 1,
+      "clientId": 1,
+      "client": {
+        "id": 1,
+        "name": "Acme Corporation",
+        "status": 1
+      }
+    },
+    {
+      "id": 4,
+      "username": "maria.garcia",
+      "status": 0,
+      "clientId": 2,
+      "client": {
+        "id": 2,
+        "name": "Tech Solutions",
+        "status": 1
+      }
+    }
+  ],
+  "meta": {
+    "total": 25,
+    "page": 1,
+    "lastPage": 3
+  }
+}
+```
+
+## Notes
+
+- Results are ordered by user ID in descending order (newest first)
+- The endpoint returns both active (`status: 1`) and inactive (`status: 0`) users
+- Each user object includes the related client information

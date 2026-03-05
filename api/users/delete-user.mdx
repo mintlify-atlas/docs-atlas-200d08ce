@@ -1,0 +1,99 @@
+---
+title: 'Delete User'
+api: 'DELETE /api/users/:id'
+---
+
+Deactivate a user (soft delete). This operation sets the user's status to inactive rather than permanently deleting the record.
+
+## Path Parameters
+
+<ParamField path="id" type="number" required>
+  The unique identifier of the user to deactivate.
+  
+  **Example:** `5`
+</ParamField>
+
+## Response
+
+<ResponseField name="id" type="number">
+  The unique identifier of the deactivated user.
+</ResponseField>
+
+<ResponseField name="username" type="string">
+  The username of the deactivated user.
+</ResponseField>
+
+<ResponseField name="status" type="number">
+  The status of the user. Will be `0` (inactive) after successful deletion.
+</ResponseField>
+
+<ResponseField name="clientId" type="number">
+  The ID of the client associated with the user.
+</ResponseField>
+
+<ResponseField name="client" type="object">
+  The client object associated with the user.
+</ResponseField>
+
+## Error Responses
+
+<ResponseField name="404" type="error">
+  **Not Found** - User with the specified ID does not exist.
+  
+  **Message:** `Usuario con ID {id} no encontrado`
+</ResponseField>
+
+<ResponseField name="400" type="error">
+  **Bad Request** - Invalid ID format (must be a valid integer).
+</ResponseField>
+
+<ResponseField name="500" type="error">
+  **Internal Server Error** - Error deactivating the user in the database.
+</ResponseField>
+
+## Example Request
+
+```bash cURL
+curl -X DELETE https://api.example.com/api/users/5 \
+  -H "Content-Type: application/json"
+```
+
+## Example Response
+
+```json 200 - Success
+{
+  "id": 5,
+  "username": "juan.perez",
+  "status": 0,
+  "clientId": 1,
+  "client": {
+    "id": 1,
+    "name": "Acme Corporation",
+    "status": 1
+  }
+}
+```
+
+```json 404 - User Not Found
+{
+  "statusCode": 404,
+  "message": "Usuario con ID 999 no encontrado",
+  "error": "Not Found"
+}
+```
+
+```json 400 - Invalid ID Format
+{
+  "statusCode": 400,
+  "message": "Validation failed (numeric string is expected)",
+  "error": "Bad Request"
+}
+```
+
+## Important Notes
+
+- This is a **soft delete** operation - the user record is not permanently removed from the database
+- The operation changes the user's `status` field from `1` (active) to `0` (inactive)
+- Deactivated users will still appear in the list users endpoint
+- The user can potentially be reactivated by updating the status field back to `1` using the update endpoint
+- All user data and associations (including client relationship) are preserved

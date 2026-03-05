@@ -1,0 +1,140 @@
+---
+title: 'Update User'
+api: 'PATCH /api/users/:id'
+---
+
+Update user information such as username or associated client.
+
+## Path Parameters
+
+<ParamField path="id" type="number" required>
+  The unique identifier of the user to update.
+  
+  **Example:** `5`
+</ParamField>
+
+## Request Body
+
+All fields are optional. Only include the fields you want to update.
+
+<ParamField body="username" type="string" optional>
+  New username for the user. Must be between 3 and 30 characters if provided.
+  
+  **Example:** `juan.perez.updated`
+</ParamField>
+
+<ParamField body="clientId" type="number" optional>
+  New client ID to associate with the user.
+  
+  **Example:** `2`
+</ParamField>
+
+## Response
+
+<ResponseField name="id" type="number">
+  The unique identifier of the updated user.
+</ResponseField>
+
+<ResponseField name="username" type="string">
+  The updated username.
+</ResponseField>
+
+<ResponseField name="clientId" type="number">
+  The updated client ID.
+</ResponseField>
+
+<ResponseField name="status" type="number">
+  The status of the user. `1` for active, `0` for inactive.
+</ResponseField>
+
+<ResponseField name="client" type="object">
+  The client object associated with the user.
+</ResponseField>
+
+## Error Responses
+
+<ResponseField name="404" type="error">
+  **Not Found** - User with the specified ID does not exist.
+  
+  **Message:** `Usuario con ID {id} no encontrado`
+</ResponseField>
+
+<ResponseField name="400" type="error">
+  **Bad Request** - Validation error or invalid ID format.
+  
+  Possible causes:
+  - Username is too short (less than 3 characters) or too long (more than 30 characters)
+  - Client ID is invalid
+  - ID parameter is not a valid integer
+</ResponseField>
+
+<ResponseField name="500" type="error">
+  **Internal Server Error** - Error updating the user in the database.
+</ResponseField>
+
+## Example Request
+
+```bash cURL - Update Username
+curl -X PATCH https://api.example.com/api/users/5 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "juan.perez.updated"
+  }'
+```
+
+```bash cURL - Update Client
+curl -X PATCH https://api.example.com/api/users/5 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "clientId": 2
+  }'
+```
+
+```bash cURL - Update Multiple Fields
+curl -X PATCH https://api.example.com/api/users/5 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "juan.perez.new",
+    "clientId": 3
+  }'
+```
+
+## Example Response
+
+```json 200 - Success
+{
+  "id": 5,
+  "username": "juan.perez.updated",
+  "status": 1,
+  "clientId": 2,
+  "client": {
+    "id": 2,
+    "name": "Tech Solutions",
+    "status": 1
+  }
+}
+```
+
+```json 404 - User Not Found
+{
+  "statusCode": 404,
+  "message": "Usuario con ID 999 no encontrado",
+  "error": "Not Found"
+}
+```
+
+```json 400 - Validation Error
+{
+  "statusCode": 400,
+  "message": [
+    "El usuario no puede tener más de 30 caracteres"
+  ],
+  "error": "Bad Request"
+}
+```
+
+## Notes
+
+- This is a partial update (PATCH) - you only need to send the fields you want to update
+- The user must exist before attempting to update
+- If updating the `clientId`, the new client must exist in the database

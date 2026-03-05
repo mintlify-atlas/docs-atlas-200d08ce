@@ -1,0 +1,76 @@
+---
+title: 'Create Client'
+api: 'POST /api/clients'
+description: 'Register a new client in the system'
+---
+
+## Request
+
+### Body Parameters
+
+<ParamField body="name" type="string" required>
+  Business name or client name. Must be between 3 and 100 characters.
+  
+  **Example:** `"Empresa SAC"`
+</ParamField>
+
+## Response
+
+<ResponseField name="id" type="number">
+  Unique identifier for the newly created client
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Client's business name or name
+</ResponseField>
+
+<ResponseField name="status" type="number">
+  Client status. `1` for active, `0` for inactive. New clients are created with active status.
+</ResponseField>
+
+## Error Responses
+
+### 400 Bad Request
+
+Returned when validation fails:
+
+- `name` is required
+- `name` must be a string
+- `name` must be at least 3 characters long
+- `name` must not exceed 100 characters
+
+### 500 Internal Server Error
+
+Returned when an unexpected database error occurs while creating the client.
+
+## Example Request
+
+```bash cURL
+curl -X POST https://api.example.com/api/clients \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Empresa SAC"
+  }'
+```
+
+## Example Response
+
+```json 201 Created
+{
+  "id": 1,
+  "name": "Empresa SAC",
+  "status": 1
+}
+```
+
+```json 400 Bad Request
+{
+  "statusCode": 400,
+  "message": [
+    "name must be longer than or equal to 3 characters",
+    "name must be a string",
+    "name should not be empty"
+  ],
+  "error": "Bad Request"
+}
+```

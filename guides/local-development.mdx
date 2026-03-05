@@ -1,0 +1,397 @@
+---
+title: 'Local Development'
+description: 'Complete guide for running and developing the Sinapsis Marketing Campaigns API locally'
+icon: 'code'
+---
+
+## Prerequisites
+
+Before starting local development, ensure you have the following tools installed:
+
+- **Docker & Docker Compose** - For running MySQL database
+- **Bun** (v1.0 or higher) - Runtime and package manager
+- **Git** - Version control
+
+<Note>
+  This project uses **Bun** as the primary runtime for optimal performance during development. All scripts in `package.json` are configured to work with Bun.
+</Note>
+
+## Initial Setup
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/JonathanLara27/backend-sinapsis-test
+    cd backend-sinapsis-test
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    ```bash
+    bun install
+    ```
+    
+    This will install all packages defined in `package.json`, including NestJS, TypeORM, and testing dependencies.
+  </Step>
+
+  <Step title="Start the database">
+    The project includes a `docker-compose.yml` configured with MySQL 8:
+
+    ```bash
+    docker-compose up -d
+    ```
+
+    This will:
+    - Pull the `mysql:8.0` image
+    - Create a database named `sinapsis_db`
+    - Expose port **3307** (to avoid conflicts with local MySQL installations)
+    - Set root password to `root`
+    - Persist data in a Docker volume
+
+    <Tip>
+      The database is exposed on port **3307** instead of the default 3306 to prevent conflicts with existing MySQL installations.
+    </Tip>
+  </Step>
+
+  <Step title="Configure environment variables">
+    Create a `.env` file in the project root with your database configuration:
+
+    ```bash
+    DB_HOST=localhost
+    DB_PORT=3307
+    DB_USERNAME=root
+    DB_PASSWORD=root
+    DB_NAME=sinapsis_db
+    DB_SYNCHRONIZE=true
+
+    SWAGGER_TITLE=Sinapsis Marketing Campaigns API
+    SWAGGER_DESCRIPTION=API RESTful para gestión de campañas de marketing
+    SWAGGER_VERSION=1.1.1
+    SWAGGER_PATH=api/docs
+    ```
+
+    <Warning>
+      Set `DB_SYNCHRONIZE=false` in production environments. Auto-synchronization should only be used during development.
+    </Warning>
+  </Step>
+</Steps>
+
+## Running the Application
+
+The API can be run in different modes depending on your development needs:
+
+<CodeGroup>
+  ```bash Development Mode (Recommended)
+  bun run start:dev
+  ```
+
+  ```bash Production Mode
+  bun run start:prod
+  ```
+
+  ```bash Serverless Mode (Lambda Simulation)
+  bun run start:sls
+  ```
+
+  ```bash Standard NestJS Start
+  bun run start
+  ```
+</CodeGroup>
+
+### Development Mode (Hot Reload)
+
+The recommended way to run the API during development:
+
+```bash
+bun run start:dev
+```
+
+This command uses Bun's `--watch` flag to automatically restart the server when you make changes to source files:
+
+```json
+"start:dev": "bun --watch src/main.ts"
+```
+
+**Features:**
+- Hot reload on file changes
+- Fast startup time with Bun runtime
+- Direct execution without compilation
+- Access to NestJS features and middleware
+
+The API will be available at: `http://localhost:3000/api`
+
+### Serverless Mode
+
+To test the Lambda deployment locally using `serverless-offline`:
+
+```bash
+bun run start:sls
+```
+
+This command:
+1. Builds the project with `nest build`
+2. Starts the serverless offline emulator
+3. Simulates AWS Lambda + API Gateway environment
+
+The API will be available at: `http://localhost:3000/dev`
+
+<Note>
+  In serverless mode, the API is prefixed with the stage name (`/dev` by default). This mirrors the AWS deployment structure.
+</Note>
+
+## Accessing Swagger Documentation
+
+Once the application is running, access the interactive API documentation:
+
+<CodeGroup>
+  ```text Development Mode
+  http://localhost:3000/api/docs
+  ```
+
+  ```text Serverless Mode
+  http://localhost:3000/dev/api/docs
+  ```
+</CodeGroup>
+
+The Swagger UI provides:
+- Complete API endpoint documentation
+- Request/response schemas
+- Interactive testing with "Try it out" buttons
+- DTO validation rules and examples
+
+### Swagger Configuration
+
+Swagger is configured in `src/main.ts` using environment variables:
+
+```typescript
+const config = new DocumentBuilder()
+  .setTitle(configService.get<string>('SWAGGER_TITLE') || 'Sinapsis API')
+  .setDescription(configService.get<string>('SWAGGER_DESCRIPTION') || 'Docs')
+  .setVersion(configService.get<string>('SWAGGER_VERSION') || '1.0')
+  .addServer(`/${currentStage}`)
+  .build();
+```
+
+## Database Management
+
+### Managing the MySQL Container
+
+<CodeGroup>
+  ```bash Start Database
+  docker-compose up -d
+  ```
+
+  ```bash Stop Database
+  docker-compose down
+  ```
+
+  ```bash View Logs
+  docker-compose logs -f db
+  ```
+
+  ```bash Stop and Remove Data
+  docker-compose down -v
+  ```
+</CodeGroup>
+
+### Connecting to MySQL
+
+Connect to the MySQL container for direct database access:
+
+```bash
+docker exec -it backend-sinapsis-test-db-1 mysql -u root -p
+```
+
+Or use a GUI tool like MySQL Workbench with these settings:
+- **Host:** localhost
+- **Port:** 3307
+- **Username:** root
+- **Password:** root
+- **Database:** sinapsis_db
+
+### Schema Synchronization
+
+TypeORM can automatically synchronize your entity definitions with the database schema when `DB_SYNCHRONIZE=true`. This creates/updates tables based on your entity decorators.
+
+<Warning>
+  Automatic synchronization can cause data loss in production. Always use migrations for production deployments.
+</Warning>
+
+## Debugging
+
+### Using Bun Debugger
+
+Bun has built-in debugging support. Add the `--inspect` flag:
+
+```bash
+bun --inspect --watch src/main.ts
+```
+
+Then connect with Chrome DevTools:
+1. Open `chrome://inspect` in Chrome
+2. Click "Configure" and add `localhost:6499`
+3. Click "inspect" on your Bun process
+
+### Jest Test Debugging
+
+Debug specific tests with breakpoints:
+
+```bash
+bun run test:debug
+```
+
+This runs Jest with Node's inspector enabled:
+
+```json
+"test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand"
+```
+
+### Logging
+
+NestJS provides built-in logging. Use it in your services:
+
+```typescript
+import { Logger } from '@nestjs/common';
+
+export class CampaignsService {
+  private readonly logger = new Logger(CampaignsService.name);
+
+  async create(dto: CreateCampaignDto) {
+    this.logger.log(`Creating campaign: ${dto.name}`);
+    // ...
+  }
+}
+```
+
+## Code Quality
+
+The project includes several commands for maintaining code quality:
+
+<CodeGroup>
+  ```bash Format Code
+  bun run format
+  ```
+
+  ```bash Lint Code
+  bun run lint
+  ```
+
+  ```bash Build Project
+  bun run build
+  ```
+</CodeGroup>
+
+### Formatting with Prettier
+
+```bash
+bun run format
+```
+
+This applies Prettier formatting rules to all TypeScript files:
+
+```json
+"format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\""
+```
+
+### Linting with ESLint
+
+```bash
+bun run lint
+```
+
+This runs ESLint with automatic fixing:
+
+```json
+"lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix"
+```
+
+## Project Structure
+
+Understanding the codebase organization:
+
+```
+src/
+├── modules/           # Feature modules
+│   ├── campaigns/    # Campaign management
+│   ├── clients/      # Client CRUD
+│   ├── messages/     # Message handling
+│   ├── reports/      # Dashboard reports
+│   └── users/        # User management
+├── entities/         # TypeORM entities
+├── common/           # Shared code
+│   ├── enums/       # Status, types
+│   └── dtos/        # Base DTOs
+├── app.module.ts    # Root module
+└── main.ts          # Application bootstrap
+```
+
+## Common Development Tasks
+
+### Creating a New Module
+
+Use NestJS CLI to generate modules:
+
+```bash
+bun x nest generate module feature-name
+bun x nest generate service feature-name
+bun x nest generate controller feature-name
+```
+
+### Running Specific Tests
+
+Test a specific module:
+
+```bash
+bun run jest src/modules/campaigns/campaigns.service.spec.ts
+```
+
+Run tests in watch mode:
+
+```bash
+bun run test:watch
+```
+
+## Troubleshooting
+
+### Port Already in Use
+
+If port 3000 is already in use, modify the port in your `.env` or `src/main.ts`:
+
+```typescript
+await app.listen(process.env.PORT || 3000);
+```
+
+### Database Connection Failed
+
+Verify the MySQL container is running:
+
+```bash
+docker ps | grep mysql
+```
+
+Check connection settings in your `.env` file match the `docker-compose.yml` configuration.
+
+### TypeORM Synchronization Issues
+
+If entities aren't syncing properly:
+
+1. Drop and recreate the database:
+   ```bash
+   docker-compose down -v
+   docker-compose up -d
+   ```
+
+2. Ensure `DB_SYNCHRONIZE=true` in your `.env`
+
+3. Check that entities are properly imported in your module
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Testing Guide" icon="flask" href="/guides/testing">
+    Learn how to write and run tests
+  </Card>
+  <Card title="Deployment" icon="rocket" href="/guides/deployment">
+    Deploy to AWS Lambda
+  </Card>
+</CardGroup>

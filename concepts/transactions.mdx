@@ -1,0 +1,484 @@
+---
+title: 'Transaction Handling'
+description: 'Learn how ACID transactions ensure data consistency in the Sinapsis Marketing Campaigns API'
+---
+
+## Overview
+
+The Sinapsis Marketing Campaigns API uses **ACID transactions** to ensure data consistency when creating campaigns with multiple messages. This guarantees that either all database operations succeed together, or none of them are persisted.
+
+<Info>
+  **ACID** stands for Atomicity, Consistency, Isolation, and Durability - the four properties that guarantee reliable database transactions.
+</Info>
+
+## Why Transactions Matter
+
+When creating a marketing campaign, the system must perform multiple database operations:
+
+1. **Create a Campaign** record
+2. **Create multiple Message** records linked to the campaign
+
+Without transactions, a failure during message creation could leave an orphaned campaign in the database. Transactions ensure **atomicity** - either everything succeeds or everything is rolled back.
+
+## Implementation in CampaignsService
+
+The `CampaignsService` uses TypeORM's transaction API to wrap campaign creation in a database transaction.
+
+<CodeGroup>
+```typescript src/modules/campaigns/campaigns.service.ts
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { DataSource, EntityManager } from 'typeorm';
+import { CreateCampaignDto } from './dto/create-campaign.dto';
+import { Campaign } from '../../entities/campaign.entity';
+import { Message } from '../../entities/message.entity';
+
+@Injectable()
+export class CampaignsService {
+  constructor(private readonly dataSource: DataSource) {}
+
+  async create(createCampaignDto: CreateCampaignDto) {
+    return await this.dataSource.transaction(async (manager) => {
+      try {
+        return await this.createCampaignTransaction(manager, createCampaignDto);
+      } catch (error) {
+        throw new InternalServerErrorException('Error al crear la campaña', error.message);
+      }
+    });
+  }
+
+  private async createCampaignTransaction(
+    manager: EntityManager, 
+    dto: CreateCampaignDto
+  ) {
+    const { name, scheduledAt, userId, messages } = dto;
+
+    const newCampaign = Campaign.create(name, new Date(scheduledAt), userId);
+    const savedCampaign = await manager.save(newCampaign);
+
+    const messagesEntities = messages.map(msgText => 
+      Message.create(msgText, savedCampaign)
+    );
+    await manager.save(messagesEntities);
+
+    return {
+      message: 'Campaña creada exitosamente',
+      campaignId: savedCampaign.id,
+      totalMessages: messagesEntities.length,
+    };
+  }
+}
+```
+</CodeGroup>
+
+### Key Components
+
+#### 1. DataSource Injection
+
+```typescript
+constructor(private readonly dataSource: DataSource) {}
+```
+
+The `DataSource` is injected via dependency injection, providing access to TypeORM's transaction API.
+
+#### 2. Transaction Wrapper
+
+```typescript
+return await this.dataSource.transaction(async (manager) => {
+  // All database operations here
+});
+```
+
+The `transaction()` method:
+- Creates a new database transaction
+- Provides an `EntityManager` scoped to that transaction
+- Automatically **commits** if the callback succeeds
+- Automatically **rolls back** if an exception is thrown
+
+#### 3. Transactional EntityManager
+
+```typescript
+private async createCampaignTransaction(
+  manager: EntityManager, 
+  dto: CreateCampaignDto
+) {
+  // Use manager.save() instead of repository.save()
+}
+```
+
+All operations use the transactional `EntityManager` instead of repositories. This ensures operations are part of the same transaction.
+
+<Warning>
+  Never use repository methods directly inside a transaction callback. Always use the provided `EntityManager` to ensure operations are transactional.
+</Warning>
+
+## Transaction Flow
+
+Let's trace the execution flow when creating a campaign:
+
+<Steps>
+  <Step title="Transaction Begins">
+    TypeORM starts a database transaction:
+    
+    ```sql
+    START TRANSACTION;
+    ```
+  </Step>
+  
+  <Step title="Create Campaign">
+    The campaign entity is created and saved:
+    
+    ```typescript
+    const newCampaign = Campaign.create(name, new Date(scheduledAt), userId);
+    const savedCampaign = await manager.save(newCampaign);
+    ```
+    
+    This executes:
+    
+    ```sql
+    INSERT INTO campania (nombre, fechaHoraProgramacion, idUsuario, estado)
+    VALUES ('Campaña Navidad', '2026-12-24 10:00:00', 1, 1);
+    ```
+  </Step>
+  
+  <Step title="Create Messages">
+    All message entities are created and saved in batch:
+    
+    ```typescript
+    const messagesEntities = messages.map(msgText => 
+      Message.create(msgText, savedCampaign)
+    );
+    await manager.save(messagesEntities);
+    ```
+    
+    This executes:
+    
+    ```sql
+    INSERT INTO mensaje (mensaje, idCampania, estadoEnvio, estado)
+    VALUES 
+      ('Oferta Exclusiva', 123, 1, 1),
+      ('Descuento 50%', 123, 1, 1),
+      ('¡Última oportunidad!', 123, 1, 1);
+    ```
+  </Step>
+  
+  <Step title="Transaction Commits">
+    If all operations succeed, the transaction commits:
+    
+    ```sql
+    COMMIT;
+    ```
+    
+    All changes are permanently written to the database.
+  </Step>
+</Steps>
+
+## Rollback Behavior
+
+If any operation fails, TypeORM automatically rolls back the entire transaction.
+
+### Rollback Scenarios
+
+<Tabs>
+  <Tab title="Database Constraint Violation">
+    **Scenario**: Invalid foreign key (user doesn't exist)
+    
+    ```typescript
+    const newCampaign = Campaign.create(
+      'Test Campaign', 
+      new Date(), 
+      99999 // Non-existent userId
+    );
+    await manager.save(newCampaign); // Throws foreign key constraint error
+    ```
+    
+    **Result**:
+    ```sql
+    ROLLBACK; -- Automatic rollback
+    ```
+    
+    No campaign or messages are saved.
+  </Tab>
+  
+  <Tab title="Business Logic Error">
+    **Scenario**: Message validation fails
+    
+    ```typescript
+    const messagesEntities = messages.map(msgText => {
+      if (msgText.length > 160) {
+        throw new Error('Message exceeds 160 characters');
+      }
+      return Message.create(msgText, savedCampaign);
+    });
+    ```
+    
+    **Result**:
+    ```sql
+    ROLLBACK; -- Campaign is rolled back too
+    ```
+    
+    Even though the campaign was created first, it's rolled back with the messages.
+  </Tab>
+  
+  <Tab title="Network Interruption">
+    **Scenario**: Database connection lost mid-transaction
+    
+    ```typescript
+    await manager.save(newCampaign); // Succeeds
+    // Network interruption occurs
+    await manager.save(messagesEntities); // Fails
+    ```
+    
+    **Result**:
+    ```sql
+    ROLLBACK; -- MySQL auto-rollback on connection loss
+    ```
+    
+    MySQL automatically rolls back uncommitted transactions when a connection is lost.
+  </Tab>
+</Tabs>
+
+## Error Handling
+
+The service implements error handling at the transaction level:
+
+```typescript
+async create(createCampaignDto: CreateCampaignDto) {
+  return await this.dataSource.transaction(async (manager) => {
+    try {
+      return await this.createCampaignTransaction(manager, createCampaignDto);
+    } catch (error) {
+      // Transaction automatically rolled back before this catch block
+      throw new InternalServerErrorException(
+        'Error al crear la campaña', 
+        error.message
+      );
+    }
+  });
+}
+```
+
+### Error Flow
+
+1. **Exception thrown** inside transaction callback
+2. **Automatic rollback** by TypeORM
+3. **Exception caught** in catch block
+4. **HTTP 500 response** returned to client with error message
+
+<Note>
+  The rollback happens **before** the catch block executes. By the time error handling runs, the database is already in a consistent state.
+</Note>
+
+## ACID Properties Explained
+
+Let's examine how each ACID property is guaranteed:
+
+### Atomicity
+
+**Definition**: All operations succeed or all fail together.
+
+**Implementation**:
+- Campaign creation and message creation are wrapped in a single transaction
+- If message creation fails, the campaign is rolled back
+- No partial state exists in the database
+
+```typescript
+// ✅ Atomic: Both succeed or both fail
+await manager.save(newCampaign);
+await manager.save(messagesEntities);
+```
+
+### Consistency
+
+**Definition**: Database constraints and rules are always enforced.
+
+**Implementation**:
+- Foreign key constraints ensure messages reference valid campaigns
+- TypeORM validates entity relationships before committing
+- Enum constraints ensure valid status values
+
+```typescript
+// ✅ Consistent: campaignId references real campaign
+const message = Message.create(text, savedCampaign);
+message.campaignId = savedCampaign.id; // Valid FK
+```
+
+### Isolation
+
+**Definition**: Concurrent transactions don't interfere with each other.
+
+**Implementation**:
+- MySQL default isolation level: **REPEATABLE READ**
+- Other transactions can't see uncommitted changes
+- Prevents dirty reads and phantom reads
+
+<Info>
+  MySQL InnoDB uses row-level locking and MVCC (Multi-Version Concurrency Control) to provide isolation without blocking readers.
+</Info>
+
+### Durability
+
+**Definition**: Committed changes survive system failures.
+
+**Implementation**:
+- MySQL writes committed transactions to disk (InnoDB redo log)
+- Even if the server crashes, committed campaigns persist
+- Uncommitted transactions are lost (and rolled back)
+
+## Advanced: Manual Transaction Control
+
+While the service uses TypeORM's transaction wrapper, you can also manually control transactions using `QueryRunner`:
+
+<CodeGroup>
+```typescript Manual QueryRunner (Alternative)
+const queryRunner = this.dataSource.createQueryRunner();
+
+await queryRunner.connect();
+await queryRunner.startTransaction();
+
+try {
+  const campaign = await queryRunner.manager.save(newCampaign);
+  const messages = await queryRunner.manager.save(messagesEntities);
+  
+  await queryRunner.commitTransaction();
+  return { campaignId: campaign.id };
+} catch (error) {
+  await queryRunner.rollbackTransaction();
+  throw error;
+} finally {
+  await queryRunner.release();
+}
+```
+</CodeGroup>
+
+<Warning>
+  Manual `QueryRunner` requires explicit cleanup in a `finally` block. The automatic transaction wrapper is safer and recommended.
+</Warning>
+
+### When to Use Manual Transactions
+
+- **Long-running transactions**: Need explicit control over commit timing
+- **Savepoints**: Partial rollbacks within a transaction
+- **Custom isolation levels**: Override default `REPEATABLE READ`
+
+## Performance Considerations
+
+### Batch Inserts
+
+The service efficiently saves multiple messages in one operation:
+
+```typescript
+// ✅ Efficient: Single SQL INSERT with multiple rows
+await manager.save(messagesEntities);
+
+// ❌ Inefficient: N separate SQL INSERTs
+for (const message of messagesEntities) {
+  await manager.save(message);
+}
+```
+
+### Transaction Duration
+
+Transactions hold database locks, so minimize their duration:
+
+```typescript
+// ✅ Good: Only database operations in transaction
+return await this.dataSource.transaction(async (manager) => {
+  const campaign = await manager.save(newCampaign);
+  const messages = await manager.save(messagesEntities);
+  return { campaignId: campaign.id };
+});
+
+// ❌ Bad: External API calls inside transaction
+return await this.dataSource.transaction(async (manager) => {
+  const campaign = await manager.save(newCampaign);
+  await this.externalSmsApi.scheduleMessages(); // Holds locks!
+  const messages = await manager.save(messagesEntities);
+});
+```
+
+<Warning>
+  Never make external API calls, file I/O, or other slow operations inside a transaction. This holds database locks unnecessarily.
+</Warning>
+
+## Testing Transactions
+
+To test rollback behavior, you can simulate failures:
+
+<CodeGroup>
+```typescript Test Rollback
+it('should rollback campaign if messages fail', async () => {
+  const dto: CreateCampaignDto = {
+    name: 'Test Campaign',
+    scheduledAt: '2026-12-24 10:00:00',
+    userId: 1,
+    messages: ['Valid message', 'x'.repeat(161)], // Exceeds 160 chars
+  };
+
+  await expect(service.create(dto)).rejects.toThrow();
+
+  // Verify campaign was not persisted
+  const campaigns = await campaignRepository.find();
+  expect(campaigns).toHaveLength(0);
+});
+```
+</CodeGroup>
+
+## Best Practices
+
+1. **Use the Transaction Wrapper**: Prefer `dataSource.transaction()` over manual `QueryRunner` for safety
+
+2. **Keep Transactions Short**: Only include database operations, no external calls
+
+3. **Use EntityManager**: Always use the provided `manager` parameter, not repositories
+
+4. **Handle Errors**: Wrap transaction logic in try-catch for proper error responses
+
+5. **Batch Operations**: Save multiple entities in one call when possible
+
+6. **Test Rollbacks**: Write tests that verify rollback behavior
+
+## Common Pitfalls
+
+<Warning>
+  **Using Repositories Instead of EntityManager**
+  
+  ```typescript
+  // ❌ Wrong: Repository bypasses transaction
+  await this.campaignRepository.save(newCampaign);
+  
+  // ✅ Correct: EntityManager uses transaction
+  await manager.save(newCampaign);
+  ```
+</Warning>
+
+<Warning>
+  **Catching Errors Without Re-throwing**
+  
+  ```typescript
+  // ❌ Wrong: Swallows error, transaction commits
+  try {
+    await manager.save(invalidData);
+  } catch (error) {
+    console.log(error); // Transaction still commits!
+  }
+  
+  // ✅ Correct: Re-throw to trigger rollback
+  try {
+    await manager.save(invalidData);
+  } catch (error) {
+    console.log(error);
+    throw error; // Transaction rolls back
+  }
+  ```
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture Overview" icon="sitemap" href="/concepts/architecture">
+    Learn about the hexagonal architecture pattern
+  </Card>
+  <Card title="Database Schema" icon="database" href="/concepts/database-schema">
+    Explore entity relationships and foreign keys
+  </Card>
+</CardGroup>

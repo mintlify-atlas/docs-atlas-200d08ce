@@ -1,0 +1,280 @@
+---
+title: API Overview
+description: Overview of the Sinapsis Marketing Campaigns API endpoints, response formats, and error handling
+---
+
+The Sinapsis Marketing Campaigns API is a RESTful API built with NestJS that provides comprehensive endpoints for managing marketing campaigns, clients, users, and reporting.
+
+## Base URL
+
+The API is accessible at the following base URL structure:
+
+```
+http://localhost:3000/{stage}/api
+```
+
+Where `{stage}` is the deployment stage (e.g., `dev`, `prod`). For local development, the default stage is `dev`:
+
+```
+http://localhost:3000/dev/api
+```
+
+<Note>
+  All endpoints are prefixed with `/api` as configured in the NestJS application.
+</Note>
+
+## Available Endpoints
+
+The API is organized into four main resource groups:
+
+<CardGroup cols={2}>
+  <Card title="Campaigns" icon="bullhorn" href="/api/campaigns/create-campaign">
+    Create and schedule marketing campaigns with multiple messages
+  </Card>
+  <Card title="Clients" icon="users" href="/api/clients/create-client">
+    Manage client accounts with full CRUD operations
+  </Card>
+  <Card title="Users" icon="user" href="/api/users/create-user">
+    Manage users associated with client accounts
+  </Card>
+  <Card title="Reports" icon="chart-bar" href="/api/reports/dashboard-report">
+    Generate dashboard reports and analytics
+  </Card>
+</CardGroup>
+
+## Endpoint Summary
+
+### Campaigns
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/campaigns` | Create a new campaign with messages |
+
+### Clients
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/clients` | Register a new client |
+| `GET` | `/api/clients` | List all clients (paginated) |
+| `GET` | `/api/clients/:id` | Get client details |
+| `PATCH` | `/api/clients/:id` | Update client information |
+| `DELETE` | `/api/clients/:id` | Deactivate client (soft delete) |
+
+### Users
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/users` | Create a new user |
+| `GET` | `/api/users` | List all users (paginated) |
+| `GET` | `/api/users/:id` | Get user details |
+| `PATCH` | `/api/users/:id` | Update user information |
+| `DELETE` | `/api/users/:id` | Deactivate user (soft delete) |
+
+### Reports
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/reports/dashboard` | Get message count by shipping status |
+
+## Response Format
+
+All API responses follow a consistent JSON structure:
+
+### Success Response
+
+```json
+{
+  "message": "Success message",
+  "data": { /* Response data */ },
+  "meta": { /* Optional metadata (e.g., pagination) */ }
+}
+```
+
+### Pagination Response
+
+Endpoints that support pagination (list endpoints) return data in this format:
+
+```json
+{
+  "data": [
+    { /* Resource object */ }
+  ],
+  "meta": {
+    "total": 100,
+    "page": 1,
+    "limit": 10,
+    "totalPages": 10
+  }
+}
+```
+
+<Info>
+  The default pagination values are `page=1` and `limit=10`. You can customize these via query parameters.
+</Info>
+
+## Error Handling
+
+The API returns standard HTTP status codes and descriptive error messages:
+
+### Error Response Format
+
+```json
+{
+  "statusCode": 400,
+  "message": "Validation failed",
+  "error": "Bad Request"
+}
+```
+
+### HTTP Status Codes
+
+| Status Code | Description |
+|-------------|-------------|
+| `200` | OK - Request succeeded |
+| `201` | Created - Resource created successfully |
+| `400` | Bad Request - Invalid input or validation error |
+| `404` | Not Found - Resource not found |
+| `500` | Internal Server Error - Server-side error |
+
+### Common Error Scenarios
+
+<Accordion title="400 Bad Request">
+  **Causes:**
+  - Invalid request body format
+  - Missing required fields
+  - Validation failures (e.g., string too short/long, invalid date format)
+  - Invalid query parameters
+
+  **Example:**
+  ```json
+  {
+    "statusCode": 400,
+    "message": [
+      "name must be longer than or equal to 3 characters",
+      "messages should not be empty"
+    ],
+    "error": "Bad Request"
+  }
+  ```
+</Accordion>
+
+<Accordion title="404 Not Found">
+  **Causes:**
+  - Resource ID doesn't exist
+  - Resource has been deleted (soft deleted with status=0)
+
+  **Example:**
+  ```json
+  {
+    "statusCode": 404,
+    "message": "Client with ID 123 not found or is inactive"
+  }
+  ```
+</Accordion>
+
+<Accordion title="500 Internal Server Error">
+  **Causes:**
+  - Database connection issues
+  - Transaction rollback failures
+  - Unexpected server errors
+
+  **Example:**
+  ```json
+  {
+    "statusCode": 500,
+    "message": "Internal server error"
+  }
+  ```
+</Accordion>
+
+## Request Validation
+
+All endpoints use strict validation powered by `class-validator`. The API enforces:
+
+- **Type checking** - Ensures correct data types
+- **Length constraints** - Minimum and maximum string lengths
+- **Required fields** - Rejects requests missing required parameters
+- **Format validation** - Validates dates, email formats, etc.
+- **Whitelist mode** - Strips unknown properties from requests
+
+<Warning>
+  The API uses `forbidNonWhitelisted: true`, which means requests with unexpected properties will be rejected with a 400 error.
+</Warning>
+
+## Pagination
+
+List endpoints support pagination via query parameters:
+
+<ParamField query="page" type="number" default={1}>
+  The page number to retrieve (1-based)
+</ParamField>
+
+<ParamField query="limit" type="number" default={10}>
+  The number of items per page (maximum: 100)
+</ParamField>
+
+**Example:**
+
+```bash
+curl "http://localhost:3000/dev/api/clients?page=2&limit=20"
+```
+
+## Soft Delete
+
+The API implements soft delete for Clients and Users. When you delete a resource:
+
+- The record remains in the database
+- The `status` field is set to `0` (inactive)
+- The resource is excluded from list queries by default
+- You can still retrieve it by ID
+
+<Info>
+  Soft delete preserves data integrity and allows for potential recovery of deleted resources.
+</Info>
+
+## Interactive API Documentation
+
+The API includes interactive Swagger/OpenAPI documentation accessible at:
+
+```
+http://localhost:3000/dev/api/docs
+```
+
+The Swagger UI allows you to:
+- Explore all available endpoints
+- View request/response schemas
+- Test API calls directly from your browser
+- Download the OpenAPI specification
+
+<Tip>
+  Use the Swagger UI during development to experiment with endpoints and understand the API structure.
+</Tip>
+
+## CORS Configuration
+
+CORS is enabled for all origins in development mode. This allows you to call the API from web applications running on different domains.
+
+```typescript
+app.enableCors(); // from src/main.ts:23
+```
+
+<Warning>
+  In production, you should configure CORS to only allow specific trusted origins.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Get Started" icon="rocket" href="/quickstart">
+    Follow the quickstart guide to make your first API call
+  </Card>
+  <Card title="Authentication" icon="lock" href="/api/authentication">
+    Learn about authentication and security
+  </Card>
+  <Card title="Campaigns API" icon="bullhorn" href="/api/campaigns/create-campaign">
+    Create marketing campaigns with messages
+  </Card>
+  <Card title="Error Handling" icon="triangle-exclamation" href="/concepts/transactions">
+    Understand transaction handling and rollback behavior
+  </Card>
+</CardGroup>

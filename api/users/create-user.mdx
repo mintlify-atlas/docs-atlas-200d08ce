@@ -1,0 +1,101 @@
+---
+title: 'Create User'
+api: 'POST /api/users'
+---
+
+Creates a new user associated with a client.
+
+## Request Body
+
+<ParamField body="username" type="string" required>
+  Unique username for the user. Must be between 3 and 30 characters.
+  
+  **Example:** `juan.perez`
+</ParamField>
+
+<ParamField body="clientId" type="number" required>
+  ID of the client to which the user belongs.
+  
+  **Example:** `1`
+</ParamField>
+
+## Response
+
+<ResponseField name="id" type="number">
+  The unique identifier of the created user.
+</ResponseField>
+
+<ResponseField name="username" type="string">
+  The username of the created user.
+</ResponseField>
+
+<ResponseField name="clientId" type="number">
+  The ID of the client associated with the user.
+</ResponseField>
+
+<ResponseField name="status" type="number">
+  The status of the user. `1` for active, `0` for inactive.
+</ResponseField>
+
+<ResponseField name="client" type="object">
+  The client object associated with the user.
+</ResponseField>
+
+## Error Responses
+
+<ResponseField name="400" type="error">
+  **Bad Request** - Validation error or client does not exist.
+  
+  Possible causes:
+  - Username is too short (less than 3 characters) or too long (more than 30 characters)
+  - Username is empty
+  - Client ID is missing or invalid
+  - The specified client does not exist in the database
+</ResponseField>
+
+<ResponseField name="500" type="error">
+  **Internal Server Error** - Unexpected error while creating the user.
+</ResponseField>
+
+## Example Request
+
+```bash cURL
+curl -X POST https://api.example.com/api/users \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "juan.perez",
+    "clientId": 1
+  }'
+```
+
+## Example Response
+
+```json 201 - Success
+{
+  "id": 5,
+  "username": "juan.perez",
+  "clientId": 1,
+  "status": 1,
+  "client": {
+    "id": 1,
+    "name": "Acme Corporation"
+  }
+}
+```
+
+```json 400 - Client Not Found
+{
+  "statusCode": 400,
+  "message": "El Cliente indicado no existe."
+}
+```
+
+```json 400 - Validation Error
+{
+  "statusCode": 400,
+  "message": [
+    "El usuario no puede tener más de 30 caracteres"
+  ],
+  "error": "Bad Request"
+}
+```

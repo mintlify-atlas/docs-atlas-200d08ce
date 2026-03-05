@@ -1,0 +1,127 @@
+---
+title: Introduction
+description: RESTful API for managing and scheduling mass marketing campaigns with serverless architecture
+---
+
+# Sinapsis Marketing Campaigns API
+
+A production-ready RESTful API for managing and scheduling mass marketing campaigns, built with **NestJS** and designed for serverless deployment on AWS Lambda.
+
+## What It Does
+
+The Sinapsis Marketing Campaigns API provides a complete solution for:
+
+- **Campaign Management**: Create and schedule marketing campaigns with multiple messages
+- **User & Client Management**: Full CRUD operations with pagination and soft delete capabilities
+- **Advanced Reporting**: Generate dashboard reports showing message delivery status with optimized SQL queries
+- **Transactional Integrity**: ACID transactions ensure campaigns and messages are created atomically with automatic rollback on failures
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Hexagonal Architecture" icon="cube">
+    Modular, decoupled codebase that scales with your needs
+  </Card>
+  <Card title="ACID Transactions" icon="shield">
+    Guaranteed data integrity with automatic rollback on failures
+  </Card>
+  <Card title="Strict Validation" icon="check">
+    DTOs with class-validator and global ValidationPipe
+  </Card>
+  <Card title="Optimized Queries" icon="bolt">
+    QueryBuilder-based reports avoid memory overhead
+  </Card>
+  <Card title="API Documentation" icon="book">
+    Integrated Swagger OpenAPI documentation
+  </Card>
+  <Card title="Robust Testing" icon="flask">
+    Comprehensive unit tests with Jest including mocks and transaction simulation
+  </Card>
+</CardGroup>
+
+## Technology Stack
+
+The API is built on modern, production-proven technologies:
+
+### Core Framework
+- **NestJS 11.x** - Progressive Node.js framework with TypeScript support
+- **TypeScript 5.7** - Type-safe development with latest language features
+- **Bun Runtime** - Fast JavaScript runtime for development
+
+### Database Layer
+- **TypeORM 0.3** - Powerful ORM with QueryBuilder and transaction support
+- **MySQL 8.0** - Reliable relational database
+- **Docker Compose** - Containerized database for local development
+
+### Serverless Architecture
+- **AWS Lambda** - Serverless compute platform
+- **Serverless Framework 3.x** - Infrastructure as code for AWS deployment
+- **Serverless Offline** - Local Lambda simulation for development
+- **@vendia/serverless-express** - AWS Lambda adapter for Express applications
+
+### Validation & Documentation
+- **class-validator** - Decorator-based validation for DTOs
+- **class-transformer** - Transform plain objects to class instances
+- **Swagger/OpenAPI** - Automated API documentation with interactive UI
+
+### Testing
+- **Jest 29.x** - Comprehensive testing framework
+- **Supertest** - HTTP assertion library for integration tests
+
+## Architecture Highlights
+
+### Repository Pattern with QueryBuilder
+The reports module uses TypeORM's QueryBuilder to delegate aggregation and counting operations to the database engine, optimizing performance for large datasets:
+
+```typescript
+// Efficient query that processes data at the database level
+GET /api/reports/dashboard?month=2026-03&clientId=1
+```
+
+### Manual Transaction Control
+Campaign creation uses manual `QueryRunner` transactions to ensure atomicity:
+
+```typescript
+POST /api/campaigns
+{
+  "name": "Campaña Navidad 2026",
+  "scheduledAt": "2026-12-24T10:00:00Z",
+  "userId": 1,
+  "messages": ["Oferta Exclusiva", "Descuento 50%"]
+}
+```
+
+If any message fails to save, the entire campaign is rolled back automatically.
+
+### SOLID Principles
+
+<AccordionGroup>
+  <Accordion title="Single Responsibility Principle">
+    Strict separation between business logic (Service), input validation (DTO), and data definition (Entity)
+  </Accordion>
+  <Accordion title="Dependency Inversion Principle">
+    Constructor-based dependency injection facilitates testing and decouples components
+  </Accordion>
+</AccordionGroup>
+
+## API Endpoints Overview
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/campaigns` | Create a campaign with messages transactionally |
+| `GET` | `/api/reports/dashboard` | Get message count grouped by delivery status |
+
+<Info>
+  Full API documentation is available via Swagger UI at `/api/docs` when running the application.
+</Info>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get the API running in 5 minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Detailed setup and configuration guide
+  </Card>
+</CardGroup>

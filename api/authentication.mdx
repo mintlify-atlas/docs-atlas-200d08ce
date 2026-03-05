@@ -1,0 +1,349 @@
+---
+title: Authentication
+description: Authentication and authorization patterns for the Sinapsis Marketing Campaigns API
+---
+
+## Current Authentication Status
+
+<Warning>
+  The Sinapsis Marketing Campaigns API currently **does not implement authentication or authorization**. All endpoints are publicly accessible in the current version.
+</Warning>
+
+This page documents recommended authentication patterns and best practices for securing the API in production environments.
+
+## Why Authentication Matters
+
+Without authentication, the API is vulnerable to:
+
+- **Unauthorized access** - Anyone can create, modify, or delete resources
+- **Data breaches** - Sensitive campaign and client data is exposed
+- **Abuse** - No rate limiting or access controls
+- **Compliance issues** - Inability to audit who performed actions
+
+<Info>
+  Authentication should be implemented before deploying to production environments.
+</Info>
+
+## Recommended Authentication Strategy
+
+For a NestJS API like Sinapsis, we recommend implementing **JWT (JSON Web Token)** authentication with the following components:
+
+### 1. JWT Authentication Module
+
+Use the official NestJS JWT package:
+
+```bash
+npm install @nestjs/jwt @nestjs/passport passport passport-jwt
+npm install -D @types/passport-jwt
+```
+
+### 2. Authentication Guard
+
+Implement a JWT authentication guard to protect endpoints:
+
+```typescript
+// src/common/guards/jwt-auth.guard.ts
+import { Injectable } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+
+@Injectable()
+export class JwtAuthGuard extends AuthGuard('jwt') {}
+```
+
+### 3. Protect Endpoints
+
+Apply the guard to controllers or individual routes:
+
+```typescript
+import { Controller, Post, UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+
+@Controller('campaigns')
+export class CampaignsController {
+  @Post()
+  @UseGuards(JwtAuthGuard)  // Protect this endpoint
+  create(@Body() createCampaignDto: CreateCampaignDto) {
+    return this.campaignsService.create(createCampaignDto);
+  }
+}
+```
+
+### 4. Login Endpoint
+
+Create an authentication module with login:
+
+```typescript
+@Post('auth/login')
+async login(@Body() loginDto: LoginDto) {
+  const user = await this.authService.validateUser(
+    loginDto.username, 
+    loginDto.password
+  );
+  
+  if (!user) {
+    throw new UnauthorizedException('Invalid credentials');
+  }
+  
+  return {
+    access_token: this.authService.generateJwtToken(user),
+  };
+}
+```
+
+## Authentication Flow
+
+<Steps>
+  <Step title="User Login">
+    User sends credentials to `/auth/login` endpoint
+    
+    ```bash
+    curl -X POST http://localhost:3000/dev/api/auth/login \
+      -H "Content-Type: application/json" \
+      -d '{
+        "username": "admin@example.com",
+        "password": "securePassword123"
+      }'
+    ```
+  </Step>
+
+  <Step title="Receive JWT Token">
+    Server validates credentials and returns a JWT token
+    
+    ```json
+    {
+      "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+    }
+    ```
+  </Step>
+
+  <Step title="Include Token in Requests">
+    Client includes the token in the `Authorization` header for subsequent requests
+    
+    ```bash
+    curl -X POST http://localhost:3000/dev/api/campaigns \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+      -d '{
+        "name": "Summer Sale",
+        "scheduledAt": "2024-07-01T10:00:00Z",
+        "userId": 1,
+        "messages": ["Special offer!"]
+      }'
+    ```
+  </Step>
+
+  <Step title="Token Validation">
+    Server validates the JWT token and processes the request if valid
+  </Step>
+</Steps>
+
+## Role-Based Access Control (RBAC)
+
+Implement role-based authorization to control access based on user roles:
+
+### User Roles
+
+| Role | Permissions |
+|------|-------------|
+| `admin` | Full access to all resources |
+| `manager` | Create campaigns, manage users within their client |
+| `user` | View campaigns and reports for their client only |
+
+### Example Implementation
+
+```typescript
+// src/common/decorators/roles.decorator.ts
+import { SetMetadata } from '@nestjs/common';
+
+export enum UserRole {
+  Admin = 'admin',
+  Manager = 'manager',
+  User = 'user',
+}
+
+export const Roles = (...roles: UserRole[]) => SetMetadata('roles', roles);
+```
+
+```typescript
+// Apply to controllers
+@Post()
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.Admin, UserRole.Manager)
+create(@Body() createCampaignDto: CreateCampaignDto) {
+  return this.campaignsService.create(createCampaignDto);
+}
+```
+
+## Security Best Practices
+
+### 1. Token Expiration
+
+Configure JWT tokens with appropriate expiration times:
+
+```typescript
+JwtModule.register({
+  secret: process.env.JWT_SECRET,
+  signOptions: { 
+    expiresIn: '1h' // Tokens expire after 1 hour
+  },
+})
+```
+
+<Tip>
+  Use short-lived access tokens (15-60 minutes) and implement refresh tokens for longer sessions.
+</Tip>
+
+### 2. Secure Token Storage
+
+Store JWT tokens securely on the client side:
+
+- **Web apps**: HttpOnly cookies or secure localStorage
+- **Mobile apps**: Secure storage (Keychain on iOS, Keystore on Android)
+- **Server-to-server**: Environment variables or secrets management
+
+<Warning>
+  Never store JWT tokens in plain localStorage if the token contains sensitive information. Use HttpOnly cookies to prevent XSS attacks.
+</Warning>
+
+### 3. Environment Variables
+
+Store sensitive configuration in environment variables:
+
+```bash
+# .env
+JWT_SECRET=your-secret-key-min-32-characters
+JWT_EXPIRATION=3600
+REFRESH_TOKEN_SECRET=another-secret-key
+```
+
+<Warning>
+  Never commit `.env` files to version control. Use `.env.example` for documentation only.
+</Warning>
+
+### 4. Password Hashing
+
+Always hash passwords before storing in the database:
+
+```typescript
+import * as bcrypt from 'bcrypt';
+
+async hashPassword(password: string): Promise<string> {
+  const saltRounds = 10;
+  return bcrypt.hash(password, saltRounds);
+}
+
+async validatePassword(password: string, hash: string): Promise<boolean> {
+  return bcrypt.compare(password, hash);
+}
+```
+
+### 5. Rate Limiting
+
+Implement rate limiting to prevent brute force attacks:
+
+```bash
+npm install @nestjs/throttler
+```
+
+```typescript
+// app.module.ts
+ThrottlerModule.forRoot({
+  ttl: 60,
+  limit: 10, // 10 requests per 60 seconds
+}),
+```
+
+## API Keys for Machine-to-Machine
+
+For server-to-server integrations, consider API key authentication:
+
+```typescript
+@Injectable()
+export class ApiKeyGuard implements CanActivate {
+  canActivate(context: ExecutionContext): boolean {
+    const request = context.switchToHttp().getRequest();
+    const apiKey = request.headers['x-api-key'];
+    
+    return apiKey === process.env.API_KEY;
+  }
+}
+```
+
+**Usage:**
+
+```bash
+curl -X GET http://localhost:3000/dev/api/clients \
+  -H "X-API-Key: your-api-key-here"
+```
+
+## OAuth 2.0 Integration
+
+For enterprise applications, consider OAuth 2.0 with providers like:
+
+- **Auth0**
+- **AWS Cognito**
+- **Google OAuth**
+- **Azure Active Directory**
+
+These services provide:
+- User management
+- Multi-factor authentication (MFA)
+- Social login
+- Single sign-on (SSO)
+
+## Audit Logging
+
+Track authentication events for security and compliance:
+
+```typescript
+@Injectable()
+export class AuditService {
+  async logAuthEvent(event: {
+    userId: number;
+    action: 'login' | 'logout' | 'failed_login';
+    ipAddress: string;
+    timestamp: Date;
+  }) {
+    // Store audit logs
+  }
+}
+```
+
+## Testing Authenticated Endpoints
+
+When testing protected endpoints, first obtain a token:
+
+```bash
+# 1. Login to get token
+TOKEN=$(curl -X POST http://localhost:3000/dev/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"password"}' \
+  | jq -r '.access_token')
+
+# 2. Use token for authenticated requests
+curl -X GET http://localhost:3000/dev/api/campaigns \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="User Management" icon="users" href="/api/users/create-user">
+    Set up user accounts for authentication
+  </Card>
+  <Card title="Deployment" icon="cloud" href="/guides/deployment">
+    Learn how to secure the API in production
+  </Card>
+  <Card title="Architecture" icon="diagram-project" href="/concepts/architecture">
+    Understand where to add authentication in the architecture
+  </Card>
+  <Card title="Testing" icon="flask" href="/guides/testing">
+    Test authenticated endpoints
+  </Card>
+</CardGroup>
+
+## Additional Resources
+
+- [NestJS Authentication Docs](https://docs.nestjs.com/security/authentication)
+- [JWT.io - JSON Web Tokens](https://jwt.io/)
+- [OWASP Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html)

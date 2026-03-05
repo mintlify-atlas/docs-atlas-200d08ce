@@ -1,0 +1,184 @@
+---
+title: 'Dashboard Report'
+description: 'Get message counts grouped by shipping status'
+api: 'GET /api/reports/dashboard'
+---
+
+## Overview
+
+The Dashboard Report endpoint provides aggregated statistics about messages grouped by their shipping status. This endpoint is optimized for performance using TypeORM's QueryBuilder pattern, which delegates aggregation logic to the database engine rather than processing data in application memory.
+
+<Info>
+This endpoint is designed to handle large volumes of data efficiently by leveraging SQL aggregation directly at the database level.
+</Info>
+
+## Endpoint
+
+```
+GET /api/reports/dashboard
+```
+
+## Query Parameters
+
+<ParamField query="month" type="number" required>
+  Numeric month value (1-12) to filter campaigns by their scheduled date. The endpoint filters campaigns where `MONTH(campaign.scheduledAt)` matches this value.
+  
+  **Example:** `1` for January, `12` for December
+</ParamField>
+
+<ParamField query="clientId" type="number">
+  Optional client ID to filter results for a specific client. When provided, only messages associated with campaigns belonging to users of this client will be included.
+  
+  **Example:** `1`
+</ParamField>
+
+## Response
+
+The endpoint returns an array of objects containing message counts grouped by shipping status.
+
+<ResponseField name="shippingStatus" type="number">
+  The shipping status code:
+  - `1` - PENDING (Pendiente)
+  - `2` - SENT (Enviado)
+  - `3` - ERROR (Error)
+</ResponseField>
+
+<ResponseField name="count" type="number">
+  The total number of messages with this shipping status that match the filter criteria.
+</ResponseField>
+
+### Response Example
+
+```json
+[
+  {
+    "shippingStatus": 1,
+    "count": 5
+  },
+  {
+    "shippingStatus": 2,
+    "count": 10
+  },
+  {
+    "shippingStatus": 3,
+    "count": 2
+  }
+]
+```
+
+## Aggregation Logic
+
+The endpoint uses a sophisticated query that:
+
+1. **Joins Related Entities**: Inner joins `message` → `campaign` → `user` to ensure data integrity
+2. **Applies Active Status Filters**: Only includes records where all entities (message, campaign, and user) have `status = ACTIVE`
+3. **Filters by Month**: Applies the month filter on `campaign.scheduledAt`
+4. **Optional Client Filter**: When `clientId` is provided, filters by `user.clientId`
+5. **Groups and Counts**: Uses SQL `GROUP BY` on `shippingStatus` and `COUNT()` aggregation
+
+<Note>
+**QueryBuilder Optimization**: This endpoint leverages TypeORM's `createQueryBuilder()` to construct an efficient SQL query. By using `SELECT COUNT()` and `GROUP BY` at the database level, the aggregation is performed by MySQL's query engine rather than loading all records into Node.js memory. This approach significantly reduces memory consumption and improves performance when dealing with thousands or millions of messages.
+</Note>
+
+## Example Requests
+
+### Basic Request (Required Month Parameter)
+
+<CodeGroup>
+```bash cURL
+curl -X GET "http://localhost:3000/dev/api/reports/dashboard?month=1"
+```
+
+```javascript JavaScript
+const response = await fetch(
+  'http://localhost:3000/dev/api/reports/dashboard?month=1'
+);
+const data = await response.json();
+console.log(data);
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    'http://localhost:3000/dev/api/reports/dashboard',
+    params={'month': 1}
+)
+data = response.json()
+print(data)
+```
+</CodeGroup>
+
+### Filtered by Client
+
+<CodeGroup>
+```bash cURL
+curl -X GET "http://localhost:3000/dev/api/reports/dashboard?month=3&clientId=5"
+```
+
+```javascript JavaScript
+const response = await fetch(
+  'http://localhost:3000/dev/api/reports/dashboard?month=3&clientId=5'
+);
+const data = await response.json();
+console.log(data);
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    'http://localhost:3000/dev/api/reports/dashboard',
+    params={'month': 3, 'clientId': 5}
+)
+data = response.json()
+print(data)
+```
+</CodeGroup>
+
+## Implementation Details
+
+The endpoint is implemented in two main files:
+
+- **Controller** (`reports.controller.ts:11-16`): Defines the HTTP route and delegates to the service
+- **Service** (`reports.service.ts:15-42`): Contains the business logic and QueryBuilder implementation
+
+### Query Construction
+
+The service method builds a query that:
+
+```sql
+SELECT 
+  message.shippingStatus as shippingStatus,
+  COUNT(message.id) as count
+FROM message
+INNER JOIN campaign ON message.campaignId = campaign.id
+INNER JOIN user ON campaign.userId = user.id
+WHERE 
+  message.status = 'ACTIVE'
+  AND campaign.status = 'ACTIVE'
+  AND user.status = 'ACTIVE'
+  AND MONTH(campaign.scheduledAt) = :month
+  AND user.clientId = :clientId  -- (optional)
+GROUP BY message.shippingStatus
+```
+
+The results are then formatted by converting string values returned by TypeORM's `getRawMany()` into proper numbers.
+
+## Validation
+
+The endpoint enforces strict validation on query parameters:
+
+- `month`: Required, must be an integer between 1 and 12
+- `clientId`: Optional, must be an integer if provided
+
+Invalid parameters will return a `400 Bad Request` response with validation error details.
+
+## Performance Considerations
+
+This endpoint is optimized for production use with large datasets:
+
+- Uses database-level aggregation instead of in-memory processing
+- Only selects necessary fields (shippingStatus and count)
+- Filters inactive records early in the query pipeline
+- Indexes on `status`, `scheduledAt`, and `clientId` columns improve query performance

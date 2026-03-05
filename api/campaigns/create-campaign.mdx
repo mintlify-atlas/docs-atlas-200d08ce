@@ -1,0 +1,193 @@
+---
+title: 'Create Campaign'
+description: 'Create a new scheduled campaign with messages'
+api: 'POST /api/campaigns'
+---
+
+## Endpoint
+
+Creates a new campaign with one or more messages and schedules it for future delivery.
+
+<Note>
+This endpoint uses database transactions to ensure atomicity. If any part of the campaign creation fails, all changes are rolled back.
+</Note>
+
+## Request Body
+
+<ParamField body="name" type="string" required>
+  Campaign name for identification purposes
+  
+  **Example:** `"Campaña Navidad 2026"`
+</ParamField>
+
+<ParamField body="scheduledAt" type="string" required>
+  ISO 8601 datetime string when the campaign should be executed
+  
+  **Example:** `"2026-12-24T10:00:00Z"` or `"2026-12-24 10:00:00"`
+</ParamField>
+
+<ParamField body="userId" type="number" required>
+  ID of the user creating the campaign
+  
+  **Example:** `1`
+</ParamField>
+
+<ParamField body="messages" type="array" required>
+  Array of message strings to be sent as part of the campaign
+  
+  - Must contain at least 1 message
+  - Each message must be at least 5 characters long
+  - Empty messages are not allowed
+  - Messages are automatically trimmed
+  
+  **Example:** `["Oferta Exclusiva", "Descuento 50%"]`
+</ParamField>
+
+## Response
+
+<ResponseField name="message" type="string">
+  Success message confirming campaign creation
+</ResponseField>
+
+<ResponseField name="campaignId" type="number">
+  ID of the newly created campaign
+</ResponseField>
+
+<ResponseField name="totalMessages" type="number">
+  Number of messages successfully created for the campaign
+</ResponseField>
+
+## Code Example
+
+### Transaction Handling
+
+The service uses TypeORM transactions to ensure data consistency:
+
+```typescript campaigns.service.ts
+async create(createCampaignDto: CreateCampaignDto) {
+  return await this.dataSource.transaction(async (manager) => {
+    try {
+      return await this.createCampaignTransaction(manager, createCampaignDto);
+    } catch (error) {
+      throw new InternalServerErrorException('Error al crear la campaña', error.message);
+    }
+  });
+}
+
+private async createCampaignTransaction(
+  manager: EntityManager, 
+  dto: CreateCampaignDto
+) {
+  const { name, scheduledAt, userId, messages } = dto;
+
+  const newCampaign = Campaign.create(name, new Date(scheduledAt), userId);
+  
+  const savedCampaign = await manager.save(newCampaign);
+
+  const messagesEntities = messages.map(msgText => 
+    Message.create(msgText, savedCampaign)
+  );
+
+  await manager.save(messagesEntities);
+
+  return {
+    message: 'Campaña creada exitosamente',
+    campaignId: savedCampaign.id,
+    totalMessages: messagesEntities.length,
+  };
+}
+```
+
+## cURL Example
+
+```bash
+curl -X POST https://api.example.com/api/campaigns \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Campaña Navidad 2026",
+    "scheduledAt": "2026-12-24T10:00:00Z",
+    "userId": 1,
+    "messages": [
+      "Oferta Exclusiva: 50% de descuento en todos los productos",
+      "Envío gratis en compras mayores a $50",
+      "Promoción válida hasta el 31 de diciembre"
+    ]
+  }'
+```
+
+## Response Examples
+
+### Success Response
+
+```json
+{
+  "message": "Campaña creada exitosamente",
+  "campaignId": 42,
+  "totalMessages": 3
+}
+```
+
+**Status Code:** `201 Created`
+
+### Error Responses
+
+#### Invalid Input Data
+
+```json
+{
+  "statusCode": 400,
+  "message": [
+    "La campaña debe tener al menos un mensaje",
+    "Cada mensaje debe tener al menos 5 caracteres"
+  ],
+  "error": "Bad Request"
+}
+```
+
+**Status Code:** `400 Bad Request`
+
+<Warning>
+Common validation errors include:
+- Empty messages array
+- Messages shorter than 5 characters
+- Invalid ISO 8601 date format
+- Missing required fields
+</Warning>
+
+#### Internal Server Error
+
+```json
+{
+  "statusCode": 500,
+  "message": "Error al crear la campaña",
+  "error": "Internal Server Error"
+}
+```
+
+**Status Code:** `500 Internal Server Error`
+
+<Tip>
+If you encounter a 500 error, check your database connection and ensure all entity relationships are properly configured. The transaction will automatically roll back on failure.
+</Tip>
+
+## Validation Rules
+
+The following validation rules are enforced by the `CreateCampaignDto`:
+
+| Field | Rules |
+|-------|-------|
+| `name` | Required, non-empty string |
+| `scheduledAt` | Required, valid ISO 8601 date string |
+| `userId` | Required, integer value |
+| `messages` | Required array with at least 1 element, each string min 5 characters, non-empty after trimming |
+
+## Error Cases
+
+| Error | Status Code | Cause |
+|-------|-------------|-------|
+| Validation Error | 400 | Invalid request body (see validation rules above) |
+| Internal Server Error | 500 | Database transaction failure, entity creation error |
+
+<Note>
+All database operations are wrapped in a transaction. If any step fails (campaign creation or message insertion), all changes are automatically rolled back to maintain data integrity.
+</Note>

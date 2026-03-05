@@ -1,0 +1,111 @@
+---
+title: 'List Clients'
+api: 'GET /api/clients'
+description: 'Retrieve a paginated list of all clients'
+---
+
+## Request
+
+### Query Parameters
+
+<ParamField query="page" type="number" default="1">
+  Current page number. Must be a positive integer greater than or equal to 1.
+  
+  **Example:** `1`
+</ParamField>
+
+<ParamField query="limit" type="number" default="10">
+  Number of items per page. Must be a positive integer greater than or equal to 1.
+  
+  **Example:** `10`
+</ParamField>
+
+## Response
+
+<ResponseField name="data" type="array">
+  Array of client objects
+  
+  <ResponseField name="id" type="number">
+    Client's unique identifier
+  </ResponseField>
+  
+  <ResponseField name="name" type="string">
+    Client's business name or name
+  </ResponseField>
+  
+  <ResponseField name="status" type="number">
+    Client status. `1` for active, `0` for inactive
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="meta" type="object">
+  Pagination metadata
+  
+  <ResponseField name="total" type="number">
+    Total number of clients in the database
+  </ResponseField>
+  
+  <ResponseField name="page" type="number">
+    Current page number
+  </ResponseField>
+  
+  <ResponseField name="lastPage" type="number">
+    Total number of pages available
+  </ResponseField>
+</ResponseField>
+
+## Error Responses
+
+### 400 Bad Request
+
+Returned when query parameters fail validation:
+
+- `page` must be a positive number
+- `page` must be at least 1
+- `limit` must be a positive number
+- `limit` must be at least 1
+
+## Example Request
+
+```bash cURL
+curl -X GET "https://api.example.com/api/clients?page=1&limit=10"
+```
+
+```bash cURL (Default pagination)
+curl -X GET "https://api.example.com/api/clients"
+```
+
+## Example Response
+
+```json 200 OK
+{
+  "data": [
+    {
+      "id": 2,
+      "name": "Corporación XYZ",
+      "status": 1
+    },
+    {
+      "id": 1,
+      "name": "Empresa SAC",
+      "status": 1
+    }
+  ],
+  "meta": {
+    "total": 2,
+    "page": 1,
+    "lastPage": 1
+  }
+}
+```
+
+```json 200 OK (Empty result)
+{
+  "data": [],
+  "meta": {
+    "total": 0,
+    "page": 1,
+    "lastPage": 0
+  }
+}
+```

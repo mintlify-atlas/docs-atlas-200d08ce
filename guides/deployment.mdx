@@ -1,0 +1,704 @@
+---
+title: 'AWS Deployment'
+description: 'Complete guide for deploying the Sinapsis API to AWS Lambda with RDS, VPC, and secrets management'
+icon: 'rocket'
+---
+
+## Overview
+
+The Sinapsis Marketing Campaigns API is designed for serverless deployment on AWS using **Serverless Framework**. This guide covers production deployment with:
+
+- **AWS Lambda** - Serverless compute
+- **Amazon RDS MySQL** - Managed relational database
+- **VPC Configuration** - Secure networking
+- **AWS Systems Manager (SSM)** - Secrets management
+- **API Gateway** - HTTP endpoint routing
+
+<Warning>
+  Production deployments require proper VPC configuration and secrets management. Never commit credentials or use `.env` files in production.
+</Warning>
+
+## Architecture Overview
+
+The deployed architecture includes:
+
+```
+┌─────────────┐      ┌──────────────┐      ┌─────────────┐
+│   Client    │─────▶│ API Gateway  │─────▶│   Lambda    │
+└─────────────┘      └──────────────┘      └─────────────┘
+                                                   │
+                                                   │ VPC
+                                                   ▼
+                                            ┌─────────────┐
+                                            │  RDS MySQL  │
+                                            └─────────────┘
+```
+
+**Key Points:**
+- Lambda functions run in a VPC to access RDS
+- RDS is in private subnets with security groups
+- API Gateway provides public HTTPS endpoints
+- SSM Parameter Store holds sensitive configuration
+
+## Prerequisites
+
+Before deploying, ensure you have:
+
+- **AWS Account** with appropriate IAM permissions
+- **AWS CLI** installed and configured
+- **Serverless Framework** installed (`npm install -g serverless`)
+- **Bun** runtime for building the project
+- **Database Migration Strategy** (TypeORM migrations or manual schema)
+
+## Infrastructure Setup
+
+### Step 1: Provision Amazon RDS
+
+Create a MySQL database instance for production data.
+
+<Steps>
+  <Step title="Create RDS Instance">
+    Use the AWS Console or CloudFormation:
+
+    **Recommended Settings:**
+    - **Engine:** MySQL 8.0 or Aurora Serverless MySQL
+    - **Instance Class:** db.t3.micro (for testing) or db.t3.medium (production)
+    - **Storage:** 20 GB SSD (gp3) with autoscaling
+    - **Multi-AZ:** Enabled for high availability
+    - **VPC:** Place in private subnets
+    - **Public Access:** Disabled
+
+    <Tip>
+      Consider **Aurora Serverless v2** for automatic scaling based on traffic patterns.
+    </Tip>
+  </Step>
+
+  <Step title="Configure Security Group">
+    Create a security group for RDS that allows:
+
+    - **Inbound:** Port 3306 from Lambda security group only
+    - **Outbound:** Not required
+
+    ```bash
+    # Example using AWS CLI
+    aws ec2 create-security-group \
+      --group-name sinapsis-rds-sg \
+      --description "Security group for Sinapsis RDS" \
+      --vpc-id vpc-xxxxx
+
+    aws ec2 authorize-security-group-ingress \
+      --group-id sg-xxxxx \
+      --protocol tcp \
+      --port 3306 \
+      --source-group sg-lambda-xxxxx
+    ```
+  </Step>
+
+  <Step title="Initialize Database Schema">
+    Connect to your RDS instance and create the initial schema:
+
+    ```bash
+    mysql -h your-rds-endpoint.rds.amazonaws.com -u admin -p
+    ```
+
+    ```sql
+    CREATE DATABASE sinapsis_db;
+    USE sinapsis_db;
+    -- Run your schema creation scripts
+    ```
+
+    <Note>
+      Set `DB_SYNCHRONIZE=false` in production. Use TypeORM migrations for schema changes.
+    </Note>
+  </Step>
+
+  <Step title="Note RDS Connection Details">
+    You'll need these for SSM configuration:
+
+    - RDS Endpoint (hostname)
+    - Port (3306)
+    - Master username
+    - Master password
+    - Database name
+  </Step>
+</Steps>
+
+### Step 2: Configure VPC Networking
+
+Lambda functions must run inside your VPC to access RDS.
+
+<Steps>
+  <Step title="Identify VPC Resources">
+    Note the following from your VPC:
+
+    - **VPC ID:** `vpc-xxxxx`
+    - **Private Subnet IDs:** `subnet-xxxxx`, `subnet-yyyyy` (at least 2 for high availability)
+    - **Lambda Security Group ID:** `sg-xxxxx`
+
+    <Tip>
+      Use private subnets with NAT Gateway if your Lambda needs internet access (e.g., for external APIs).
+    </Tip>
+  </Step>
+
+  <Step title="Create Lambda Security Group">
+    Create a security group for Lambda functions:
+
+    ```bash
+    aws ec2 create-security-group \
+      --group-name sinapsis-lambda-sg \
+      --description "Security group for Sinapsis Lambda functions" \
+      --vpc-id vpc-xxxxx
+    ```
+
+    This security group should:
+    - Allow outbound traffic to RDS security group on port 3306
+    - Allow outbound HTTPS (443) if Lambda needs internet access
+  </Step>
+
+  <Step title="Update serverless.yml">
+    Add VPC configuration to `serverless.yml`:
+
+    ```yaml
+    provider:
+      name: aws
+      runtime: nodejs18.x
+      region: us-east-1
+      stage: ${opt:stage, 'prod'}
+      vpc:
+        securityGroupIds:
+          - sg-xxxxx  # Lambda security group
+        subnetIds:
+          - subnet-xxxxx  # Private subnet 1
+          - subnet-yyyyy  # Private subnet 2
+    ```
+
+    <Warning>
+      VPC-enabled Lambda functions have slower cold starts (2-10 seconds). Consider provisioned concurrency for critical APIs.
+    </Warning>
+  </Step>
+</Steps>
+
+### Step 3: Secrets Management with AWS SSM
+
+Store all sensitive configuration in AWS Systems Manager Parameter Store.
+
+<Steps>
+  <Step title="Create SSM Parameters">
+    Store each environment variable as a SecureString parameter:
+
+    ```bash
+    # Database configuration
+    aws ssm put-parameter \
+      --name "/sinapsis/prod/DB_HOST" \
+      --value "your-rds-endpoint.rds.amazonaws.com" \
+      --type "String"
+
+    aws ssm put-parameter \
+      --name "/sinapsis/prod/DB_PORT" \
+      --value "3306" \
+      --type "String"
+
+    aws ssm put-parameter \
+      --name "/sinapsis/prod/DB_USERNAME" \
+      --value "admin" \
+      --type "String"
+
+    aws ssm put-parameter \
+      --name "/sinapsis/prod/DB_PASSWORD" \
+      --value "your-secure-password" \
+      --type "SecureString"
+
+    aws ssm put-parameter \
+      --name "/sinapsis/prod/DB_NAME" \
+      --value "sinapsis_db" \
+      --type "String"
+
+    aws ssm put-parameter \
+      --name "/sinapsis/prod/DB_SYNCHRONIZE" \
+      --value "false" \
+      --type "String"
+
+    # Swagger configuration
+    aws ssm put-parameter \
+      --name "/sinapsis/prod/SWAGGER_TITLE" \
+      --value "Sinapsis Marketing Campaigns API" \
+      --type "String"
+
+    aws ssm put-parameter \
+      --name "/sinapsis/prod/SWAGGER_DESCRIPTION" \
+      --value "API RESTful para gestión de campañas de marketing" \
+      --type "String"
+
+    aws ssm put-parameter \
+      --name "/sinapsis/prod/SWAGGER_VERSION" \
+      --value "1.1.1" \
+      --type "String"
+
+    aws ssm put-parameter \
+      --name "/sinapsis/prod/SWAGGER_PATH" \
+      --value "api/docs" \
+      --type "String"
+    ```
+  </Step>
+
+  <Step title="Grant Lambda IAM Permissions">
+    Add SSM permissions to your Lambda execution role:
+
+    ```yaml
+    # In serverless.yml
+    provider:
+      iam:
+        role:
+          statements:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+                - ssm:GetParameters
+              Resource:
+                - arn:aws:ssm:${aws:region}:${aws:accountId}:parameter/sinapsis/prod/*
+    ```
+  </Step>
+
+  <Step title="Reference Parameters in serverless.yml">
+    Update environment variables to reference SSM:
+
+    ```yaml
+    provider:
+      environment:
+        DB_HOST: ${ssm:/sinapsis/prod/DB_HOST}
+        DB_PORT: ${ssm:/sinapsis/prod/DB_PORT}
+        DB_USERNAME: ${ssm:/sinapsis/prod/DB_USERNAME}
+        DB_PASSWORD: ${ssm:/sinapsis/prod/DB_PASSWORD~true}
+        DB_NAME: ${ssm:/sinapsis/prod/DB_NAME}
+        DB_SYNCHRONIZE: ${ssm:/sinapsis/prod/DB_SYNCHRONIZE}
+        
+        SWAGGER_TITLE: ${ssm:/sinapsis/prod/SWAGGER_TITLE}
+        SWAGGER_DESCRIPTION: ${ssm:/sinapsis/prod/SWAGGER_DESCRIPTION}
+        SWAGGER_VERSION: ${ssm:/sinapsis/prod/SWAGGER_VERSION}
+        SWAGGER_PATH: ${ssm:/sinapsis/prod/SWAGGER_PATH}
+    ```
+
+    <Note>
+      The `~true` suffix on `DB_PASSWORD` tells Serverless Framework to decrypt the SecureString parameter.
+    </Note>
+  </Step>
+</Steps>
+
+## Serverless Configuration
+
+The `serverless.yml` file defines the deployment configuration.
+
+### Complete Production Configuration
+
+```yaml
+service: sinapsis-backend
+frameworkVersion: '3'
+
+plugins:
+  - serverless-offline
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: us-east-1
+  stage: ${opt:stage, 'prod'}
+  timeout: 30
+  memorySize: 512
+  
+  # VPC Configuration
+  vpc:
+    securityGroupIds:
+      - sg-xxxxx  # Replace with your Lambda security group
+    subnetIds:
+      - subnet-xxxxx  # Replace with your private subnets
+      - subnet-yyyyy
+  
+  # Environment Variables from SSM
+  environment:
+    DB_HOST: ${ssm:/sinapsis/prod/DB_HOST}
+    DB_PORT: ${ssm:/sinapsis/prod/DB_PORT}
+    DB_USERNAME: ${ssm:/sinapsis/prod/DB_USERNAME}
+    DB_PASSWORD: ${ssm:/sinapsis/prod/DB_PASSWORD~true}
+    DB_NAME: ${ssm:/sinapsis/prod/DB_NAME}
+    DB_SYNCHRONIZE: ${ssm:/sinapsis/prod/DB_SYNCHRONIZE}
+    
+    SWAGGER_TITLE: ${ssm:/sinapsis/prod/SWAGGER_TITLE}
+    SWAGGER_DESCRIPTION: ${ssm:/sinapsis/prod/SWAGGER_DESCRIPTION}
+    SWAGGER_VERSION: ${ssm:/sinapsis/prod/SWAGGER_VERSION}
+    SWAGGER_PATH: ${ssm:/sinapsis/prod/SWAGGER_PATH}
+  
+  # IAM Permissions
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - ssm:GetParameter
+            - ssm:GetParameters
+          Resource:
+            - arn:aws:ssm:${aws:region}:${aws:accountId}:parameter/sinapsis/prod/*
+        - Effect: Allow
+          Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+          Resource: '*'
+
+functions:
+  main:
+    handler: dist/main.handler
+    events:
+      - http:
+          method: ANY
+          path: /
+      - http:
+          method: ANY
+          path: '{proxy+}'
+
+# Optional: Custom domain configuration
+# custom:
+#   customDomain:
+#     domainName: api.sinapsis.com
+#     certificateName: '*.sinapsis.com'
+#     basePath: ''
+#     stage: ${self:provider.stage}
+#     createRoute53Record: true
+```
+
+### Key Configuration Options
+
+**Runtime Settings:**
+- `runtime: nodejs18.x` - Node.js version (Lambda supports 18.x, 20.x)
+- `timeout: 30` - Maximum execution time (seconds)
+- `memorySize: 512` - RAM allocated (MB) - affects CPU allocation
+
+**VPC Configuration:**
+- Required for RDS access
+- Use private subnets with NAT Gateway for internet access
+- Increases cold start time
+
+**IAM Role:**
+- SSM parameter access for secrets
+- CloudWatch Logs for monitoring
+- Additional permissions as needed (S3, SES, etc.)
+
+## Deployment Process
+
+<Steps>
+  <Step title="Configure AWS Credentials">
+    Set up AWS credentials for Serverless Framework:
+
+    ```bash
+    # Option 1: Using serverless CLI
+    serverless config credentials \
+      --provider aws \
+      --key YOUR_ACCESS_KEY \
+      --secret YOUR_SECRET_KEY
+
+    # Option 2: Using AWS CLI profiles
+    aws configure --profile sinapsis
+    export AWS_PROFILE=sinapsis
+    ```
+
+    <Tip>
+      Use IAM roles with least-privilege permissions. Create a dedicated deployment user with only necessary permissions.
+    </Tip>
+  </Step>
+
+  <Step title="Build the Application">
+    Compile TypeScript to JavaScript:
+
+    ```bash
+    bun run build
+    ```
+
+    This creates the `dist/` directory with compiled code. The Lambda handler is at `dist/main.handler`.
+  </Step>
+
+  <Step title="Test Locally (Optional)">
+    Test the serverless configuration locally:
+
+    ```bash
+    bun run start:sls
+    ```
+
+    This runs `serverless offline` to simulate Lambda + API Gateway locally.
+  </Step>
+
+  <Step title="Deploy to AWS">
+    Deploy to your production stage:
+
+    ```bash
+    serverless deploy --stage prod
+    ```
+
+    This will:
+    - Package your application code
+    - Upload to S3
+    - Create/update Lambda function
+    - Configure API Gateway
+    - Set up CloudWatch Logs
+    - Apply IAM roles and VPC settings
+
+    <CodeGroup>
+      ```bash Production
+      serverless deploy --stage prod
+      ```
+
+      ```bash Staging
+      serverless deploy --stage staging
+      ```
+
+      ```bash Development
+      serverless deploy --stage dev
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Verify Deployment">
+    After deployment completes, you'll see output like:
+
+    ```
+    Service Information
+    service: sinapsis-backend
+    stage: prod
+    region: us-east-1
+    stack: sinapsis-backend-prod
+    endpoints:
+      ANY - https://xxxxx.execute-api.us-east-1.amazonaws.com/prod
+      ANY - https://xxxxx.execute-api.us-east-1.amazonaws.com/prod/{proxy+}
+    functions:
+      main: sinapsis-backend-prod-main
+    ```
+
+    Test the API:
+
+    ```bash
+    curl https://xxxxx.execute-api.us-east-1.amazonaws.com/prod/api/docs
+    ```
+  </Step>
+</Steps>
+
+## Post-Deployment Tasks
+
+### Database Migrations
+
+For production schema changes, use TypeORM migrations instead of synchronization:
+
+```bash
+# Generate migration
+bun x typeorm migration:generate -n AddNewColumn
+
+# Run migrations (connect to RDS)
+bun x typeorm migration:run
+```
+
+### Monitoring and Logging
+
+CloudWatch Logs are automatically configured. View logs:
+
+```bash
+# View recent logs
+serverless logs -f main --stage prod
+
+# Tail logs in real-time
+serverless logs -f main --stage prod --tail
+```
+
+### Custom Domain (Optional)
+
+Set up a custom domain for cleaner URLs:
+
+1. Install plugin:
+   ```bash
+   npm install --save-dev serverless-domain-manager
+   ```
+
+2. Add to `serverless.yml`:
+   ```yaml
+   plugins:
+     - serverless-domain-manager
+
+   custom:
+     customDomain:
+       domainName: api.sinapsis.com
+       certificateName: '*.sinapsis.com'
+       basePath: ''
+       stage: ${self:provider.stage}
+       createRoute53Record: true
+   ```
+
+3. Create domain:
+   ```bash
+   serverless create_domain --stage prod
+   ```
+
+4. Deploy:
+   ```bash
+   serverless deploy --stage prod
+   ```
+
+### Performance Optimization
+
+**Provisioned Concurrency:**
+Eliminate cold starts for critical functions:
+
+```yaml
+functions:
+  main:
+    handler: dist/main.handler
+    provisionedConcurrency: 2
+```
+
+**Connection Pooling:**
+Configure TypeORM for Lambda:
+
+```typescript
+TypeOrmModule.forRoot({
+  // ... other config
+  extra: {
+    connectionLimit: 5, // Low limit for Lambda
+  },
+  keepConnectionAlive: false, // Don't reuse connections
+});
+```
+
+## Deployment Commands Reference
+
+<CodeGroup>
+  ```bash Deploy
+  serverless deploy --stage prod
+  ```
+
+  ```bash Deploy Function Only (Faster)
+  serverless deploy function -f main --stage prod
+  ```
+
+  ```bash Remove Stack
+  serverless remove --stage prod
+  ```
+
+  ```bash View Info
+  serverless info --stage prod
+  ```
+
+  ```bash View Logs
+  serverless logs -f main --stage prod --tail
+  ```
+
+  ```bash Invoke Function
+  serverless invoke -f main --stage prod --data '{"body":"test"}'
+  ```
+</CodeGroup>
+
+## Troubleshooting
+
+### Lambda Can't Connect to RDS
+
+**Symptoms:** Timeout errors or connection refused
+
+**Solutions:**
+1. Verify Lambda is in the correct VPC and subnets
+2. Check RDS security group allows traffic from Lambda security group
+3. Ensure RDS endpoint is correct in SSM parameters
+4. Verify NAT Gateway exists if Lambda needs internet access
+5. Check CloudWatch Logs for specific error messages
+
+### SSM Parameter Not Found
+
+**Symptoms:** Deployment fails with parameter errors
+
+**Solutions:**
+1. Verify parameters exist:
+   ```bash
+   aws ssm get-parameter --name /sinapsis/prod/DB_HOST
+   ```
+2. Check parameter names match exactly (case-sensitive)
+3. Ensure Lambda IAM role has `ssm:GetParameter` permission
+
+### Cold Start Performance
+
+**Symptoms:** First request takes 5-10 seconds
+
+**Solutions:**
+1. Enable provisioned concurrency (costs more)
+2. Use Lambda SnapStart (Java only)
+3. Reduce package size
+4. Keep Lambda warm with scheduled pings
+
+### Memory or Timeout Issues
+
+**Symptoms:** Lambda times out or runs out of memory
+
+**Solutions:**
+1. Increase `memorySize` in `serverless.yml` (also increases CPU)
+2. Increase `timeout` (max 900 seconds)
+3. Optimize database queries
+4. Use connection pooling correctly
+
+## Security Best Practices
+
+<Steps>
+  <Step title="Use SecureString Parameters">
+    Store passwords as encrypted SecureString in SSM:
+
+    ```bash
+    aws ssm put-parameter \
+      --name "/sinapsis/prod/DB_PASSWORD" \
+      --value "password" \
+      --type "SecureString"
+    ```
+  </Step>
+
+  <Step title="Restrict IAM Permissions">
+    Use least-privilege IAM roles. Only grant necessary permissions:
+
+    ```yaml
+    - Effect: Allow
+      Action:
+        - ssm:GetParameter
+      Resource:
+        - arn:aws:ssm:*:*:parameter/sinapsis/prod/*
+    ```
+  </Step>
+
+  <Step title="Enable VPC Flow Logs">
+    Monitor network traffic for security auditing
+  </Step>
+
+  <Step title="Use AWS WAF">
+    Protect API Gateway with Web Application Firewall rules
+  </Step>
+
+  <Step title="Enable CloudTrail">
+    Audit all API calls to AWS services
+  </Step>
+</Steps>
+
+## Cost Optimization
+
+**Lambda Costs:**
+- Pay per request + duration
+- First 1M requests/month are free
+- Provisioned concurrency costs more
+
+**RDS Costs:**
+- Consider Aurora Serverless for variable workloads
+- Use Reserved Instances for predictable workloads
+- Enable automated backups (required for point-in-time recovery)
+
+**Data Transfer:**
+- Traffic within same AZ is free
+- Cross-AZ traffic costs money
+- Use CloudFront CDN for static content
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Local Development" icon="code" href="/guides/local-development">
+    Set up your development environment
+  </Card>
+  <Card title="Testing Guide" icon="flask" href="/guides/testing">
+    Write and run tests
+  </Card>
+</CardGroup>
