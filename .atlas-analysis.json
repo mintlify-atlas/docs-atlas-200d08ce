@@ -1,0 +1,109 @@
+{
+  "projectType": "api-service",
+  "projectName": "Sinapsis Marketing Campaigns API",
+  "projectDescription": "A RESTful API for managing and scheduling mass marketing campaigns, built with NestJS and serverless architecture.",
+  "theme": "sequoia",
+  "primaryColor": "#94cb04",
+  "lightColor": "#545454",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/database-schema",
+              "concepts/transactions"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/local-development",
+              "guides/testing",
+              "guides/deployment"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview",
+              "api/authentication"
+            ]
+          },
+          {
+            "group": "Campaigns",
+            "pages": [
+              "api/campaigns/create-campaign"
+            ]
+          },
+          {
+            "group": "Clients",
+            "pages": [
+              "api/clients/create-client",
+              "api/clients/list-clients",
+              "api/clients/get-client",
+              "api/clients/update-client",
+              "api/clients/delete-client"
+            ]
+          },
+          {
+            "group": "Users",
+            "pages": [
+              "api/users/create-user",
+              "api/users/list-users",
+              "api/users/get-user",
+              "api/users/update-user",
+              "api/users/delete-user"
+            ]
+          },
+          {
+            "group": "Reports",
+            "pages": [
+              "api/reports/dashboard-report"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Hexagonal/modular architecture with decoupled, scalable code",
+    "ACID transactions with automatic rollback on failures",
+    "Strict validation using DTOs and class-validator",
+    "Optimized QueryBuilder for efficient SQL queries",
+    "Swagger OpenAPI documentation",
+    "Complete CRUD operations with pagination and soft delete",
+    "Serverless architecture with AWS Lambda support"
+  ],
+  "publicApiSurface": [
+    "POST /api/campaigns - Create campaign with messages",
+    "POST /api/clients - Create client",
+    "GET /api/clients - List clients (paginated)",
+    "GET /api/clients/:id - Get client details",
+    "PATCH /api/clients/:id - Update client",
+    "DELETE /api/clients/:id - Soft delete client",
+    "POST /api/users - Create user",
+    "GET /api/users - List users (paginated)",
+    "GET /api/users/:id - Get user details",
+    "PATCH /api/users/:id - Update user",
+    "DELETE /api/users/:id - Soft delete user",
+    "GET /api/reports/dashboard - Get messages by status report"
+  ]
+}
